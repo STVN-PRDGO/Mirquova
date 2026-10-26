@@ -1,0 +1,32 @@
+[
+    {
+        "sourcePath":  "D:\\Downloads\\Mirquova_ACE_TV_Plan.md",
+        "projectPath":  "docs/source/Mirquova_ACE_TV_Plan.md",
+        "bytes":  8983,
+        "sha256":  "D36D1DCEA0554A6BDE30B9A0D2D81463B957FBF94A36322A262BD0FCA88A8E1A"
+    },
+    {
+        "sourcePath":  "D:\\Downloads\\Mirquova_Master_Implementation_Plan.md",
+        "projectPath":  "docs/source/Mirquova_Master_Implementation_Plan.md",
+        "bytes":  8384,
+        "sha256":  "6E4213308820039062BA14FEFDB7A139DD55AAB7649324CDB325625AE6F7CCFB"
+    },
+    {
+        "sourcePath":  "D:\\Downloads\\Mirquova_V4_CODEX_START_PROMPT.md",
+        "projectPath":  "docs/source/Mirquova_V4_CODEX_START_PROMPT.md",
+        "bytes":  9645,
+        "sha256":  "F9F4D7B1DF9AD02C37D82017931F23E5D023301C26819C7CB4706CCF93A8B706"
+    },
+    {
+        "sourcePath":  "D:\\Downloads\\Mirquova_V4_Media_Player_Plan.md",
+        "projectPath":  "docs/source/Mirquova_V4_Media_Player_Plan.md",
+        "bytes":  9605,
+        "sha256":  "F67EF5AC74D16690C48A81ED57053B194D1A15F047F4336D280D34686A1C0A55"
+    },
+    {
+        "sourcePath":  "D:\\Downloads\\Mirquova_V4_OpenSubtitles_Integration.md",
+        "projectPath":  "docs/source/Mirquova_V4_OpenSubtitles_Integration.md",
+        "bytes":  8792,
+        "sha256":  "B705B48E62B6F9AB6BEA7713A03E9D86DBA116B1B4B5CC2D3DC8B0EBCCEF7D73"
+    }
+]

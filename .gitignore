@@ -1,0 +1,33 @@
+# Tooling and platform build output
+.dart_tool/
+.flutter-plugins-dependencies
+build/
+target/
+node_modules/
+.idea/
+.vscode/
+*.iml
+
+# Local secrets and signing material
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+key.properties
+local.properties
+*.p12
+*.pem
+
+# Private media and device evidence
+local-artifacts/
+local-evidence/
+
+# Project-local SDKs and native build products
+.toolchains/
+*.dll
+*.so
+apps/mirquova_flutter/android/app/src/main/jniLibs/
+
+# Local preview build bundles
+artifacts/

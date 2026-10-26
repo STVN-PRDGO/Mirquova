@@ -1,0 +1,18 @@
+* text=auto eol=lf
+*.rs text eol=lf
+*.dart text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.md text eol=lf whitespace=-blank-at-eol
+*.py text eol=lf
+*.ps1 text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.png binary
+*.ico binary
+*.jar binary
+# Supplied originals must retain their exact provenance hashes.
+docs/source/*.md -text
+third_party/** -text whitespace=-blank-at-eol,-blank-at-eof
