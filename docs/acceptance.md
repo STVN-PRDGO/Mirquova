@@ -10,7 +10,7 @@ Current preview: 03 (0.2.0+2). Detailed evidence: [iteration-03.md](iteration-03
 - [x] Implement bounded native mDNS scans and session-only manual IPv4 candidates.
 - [x] Implement explicit two-minute visibility, cleanup, self filtering, and multicast lease sharing.
 - [x] Exercise ABI v2 ownership and concurrent/canceled operations.
-- [x] Pass 12 Rust unit tests, two opt-in same-host network tests, 24 Flutter tests, and one real Windows runner test.
+- [x] Pass 23 Rust unit tests (including 11 invitation validation tests), two opt-in same-host network tests, 24 Flutter tests, and one real Windows runner test.
 - [x] Pass formatting, clippy, analysis, and inspect light/dark phone/desktop reference renders.
 - [x] Build Windows release and Android ARM64 debug packages; verify APK signature, contents, and alignment.
 - [x] Collect original third-party notices and provide CI configuration.

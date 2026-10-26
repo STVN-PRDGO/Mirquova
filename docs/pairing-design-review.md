@@ -41,4 +41,4 @@ The original protocol specification was not supplied. This is an independently d
 
 ## Input-validation groundwork
 
-The Rust core now includes a [bounded invitation parser](../shared/contracts/pairing-invitation.md) for an independently proposed bootstrap JSON format. Ten tests cover malformed/oversized input, duplicate and unknown fields, unsupported versions/purposes, endpoint restrictions, pin/secret encoding, local TTL boundaries, and diagnostic redaction. This does not add a pairing endpoint or trusted peer. Client-local lifetime cannot establish invitation age, server expiry, or replay protection.
+The Rust core now includes a [bounded invitation parser](../shared/contracts/pairing-invitation.md) for an independently proposed bootstrap JSON format. Eleven tests cover malformed/oversized input, duplicate and unknown fields, unsupported versions/purposes, endpoint restrictions, pin/secret encoding, local TTL boundaries, and diagnostic redaction. This does not add a pairing endpoint or trusted peer. Client-local lifetime cannot establish invitation age, server expiry, or replay protection.

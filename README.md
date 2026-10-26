@@ -28,7 +28,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-Windows.ps1
 
 Preview 03 local verification: 12 Rust unit tests, two explicitly enabled same-host network tests, 24 Flutter tests, and one actual Windows integration test passed. Formatting, clippy, and Flutter analysis passed. Windows release and Android ARM64 debug builds passed; APK signature, contents, and alignment were checked. Android installation and discovery between two physical devices remain unverified.
 
-The invitation groundwork adds 10 Rust input-validation and expiry tests. GitHub Actions checks the Windows foundation and Android ARM64 debug build on pushes and pull requests. Local preview packages live under ignored `artifacts/iteration-03/`; they are not GitHub release downloads. See [Preview 03 results](docs/iteration-03.md) for checksums and evidence.
+The invitation groundwork adds 11 Rust input-validation and expiry tests. GitHub Actions checks the Windows foundation and Android ARM64 debug build on pushes and pull requests. Local preview packages live under ignored `artifacts/iteration-03/`; they are not GitHub release downloads. See [Preview 03 results](docs/iteration-03.md) for checksums and evidence.
 
 ## Documentation
 
