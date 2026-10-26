@@ -37,7 +37,11 @@ jobs:
         working-directory: apps/mirquova_flutter
         shell: powershell
         run: |
-          $env:MIRQUOVA_CORE_BUNDLE = "${{ github.workspace }}\target\release\mirquova_core.dll"
+          $coreDll = (Join-Path $env:GITHUB_WORKSPACE 'target/release/mirquova_core.dll') -replace '\\', '/'
+          if (-not (Test-Path -LiteralPath $coreDll)) {
+            throw "Native library not found at $coreDll"
+          }
+          $env:MIRQUOVA_CORE_BUNDLE = $coreDll
           flutter build windows --release
       - name: Package Windows ZIP
         shell: powershell
@@ -71,7 +75,7 @@ jobs:
           channel: stable
       - name: Setup Android NDK and cargo-ndk
         run: |
-          sdkmanager 'ndk;28.2.13676358'
+          echo y | sdkmanager 'ndk;28.2.13676358'
           cargo install cargo-ndk --version 4.1.2 --locked
       - name: Build native Rust Android core
         run: |

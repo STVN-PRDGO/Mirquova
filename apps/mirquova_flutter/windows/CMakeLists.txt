@@ -109,7 +109,8 @@ install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
 
 # Bundle the independently built Rust discovery core beside the executable.
 if(DEFINED ENV{MIRQUOVA_CORE_BUNDLE})
-  set(MIRQUOVA_CORE_BUNDLE "$ENV{MIRQUOVA_CORE_BUNDLE}")
+  file(TO_CMAKE_PATH "$ENV{MIRQUOVA_CORE_BUNDLE}" MIRQUOVA_CORE_BUNDLE)
+  get_filename_component(MIRQUOVA_CORE_BUNDLE "${MIRQUOVA_CORE_BUNDLE}" ABSOLUTE)
 else()
   get_filename_component(MIRQUOVA_CORE_BUNDLE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../target/debug/mirquova_core.dll" ABSOLUTE)

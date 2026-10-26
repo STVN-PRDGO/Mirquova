@@ -7,7 +7,7 @@ try {
     if ($Mode -eq 'release') { cargo build -p mirquova-core --lib --release --locked }
     else { cargo build -p mirquova-core --lib --locked }
     if ($LASTEXITCODE -ne 0) { throw 'Native core build failed.' }
-    $env:MIRQUOVA_CORE_BUNDLE = Join-Path $projectRoot "target/$Mode/mirquova_core.dll"
+    $env:MIRQUOVA_CORE_BUNDLE = (Join-Path $projectRoot "target/$Mode/mirquova_core.dll") -replace '\\', '/'
     Push-Location (Join-Path $projectRoot 'apps/mirquova_flutter')
     try {
         flutter pub get --enforce-lockfile

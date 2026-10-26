@@ -5,7 +5,7 @@ Push-Location $projectRoot
 try {
     cargo build -p mirquova-core --lib --locked
     if ($LASTEXITCODE -ne 0) { throw 'Native core build failed.' }
-    $env:MIRQUOVA_CORE_BUNDLE = Join-Path $projectRoot 'target/debug/mirquova_core.dll'
+    $env:MIRQUOVA_CORE_BUNDLE = (Join-Path $projectRoot 'target/debug/mirquova_core.dll') -replace '\\', '/'
     $preview = Join-Path $projectRoot 'local-evidence/windows-native.png'
     Push-Location (Join-Path $projectRoot 'apps/mirquova_flutter')
     try {
