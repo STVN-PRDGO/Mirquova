@@ -1,7 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'adapters/github_updates.dart';
+import 'adapters/native_app_platform.dart';
+import 'core/app_platform.dart';
+import 'core/app_updates.dart';
 import 'core/discovery_port.dart';
 import 'features/nearby/nearby_page.dart';
+import 'features/settings/settings_page.dart';
 import 'theme.dart';
 
 const destinations = <(String, IconData)>[
@@ -15,8 +22,15 @@ const destinations = <(String, IconData)>[
 ];
 
 class MirquovaApp extends StatefulWidget {
-  const MirquovaApp({super.key, required this.discovery});
+  const MirquovaApp({
+    super.key,
+    required this.discovery,
+    this.appPlatform = const NativeAppPlatform(),
+    this.updateSource,
+  });
   final DiscoveryPort discovery;
+  final AppPlatform appPlatform;
+  final UpdateSource? updateSource;
   @override
   State<MirquovaApp> createState() => _MirquovaAppState();
 }
@@ -25,11 +39,40 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
   ThemeMode _theme = ThemeMode.system;
   int _selected = 0;
   final _manualEndpoints = <ManualEndpoint>[];
+  UpdateController? _updates;
+  bool _readingVersion = true;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_loadInstalledVersion());
+  }
+
+  Future<void> _loadInstalledVersion() async {
+    setState(() => _readingVersion = true);
+    UpdateController? updates;
+    try {
+      final info = await widget.appPlatform.readBuildInfo();
+      updates = UpdateController(
+        currentVersion: AppVersion.parse(
+          info.version,
+          buildNumber: info.buildNumber,
+        ),
+        source: widget.updateSource ?? GitHubUpdateSource(),
+      );
+    } on Exception {
+      // An unknown installed version must never be treated as an older build.
+    }
+    if (!mounted) {
+      updates?.dispose();
+      return;
+    }
+    setState(() {
+      _updates?.dispose();
+      _updates = updates;
+      _readingVersion = false;
+    });
   }
 
   @override
@@ -39,6 +82,7 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
         state == AppLifecycleState.detached) {
       widget.discovery.stop();
       widget.discovery.hide();
+      _updates?.cancel();
     }
   }
 
@@ -46,6 +90,7 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.discovery.dispose();
+    _updates?.dispose();
     super.dispose();
   }
 
@@ -60,44 +105,13 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
       }),
       onRemove: (endpoint) => setState(() => _manualEndpoints.remove(endpoint)),
     ),
-    6 => Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Make yourself at home',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 24),
-        DropdownButtonFormField<ThemeMode>(
-          initialValue: _theme,
-          decoration: const InputDecoration(labelText: 'Appearance'),
-          items: ThemeMode.values
-              .map(
-                (mode) => DropdownMenuItem(
-                  value: mode,
-                  child: Text(switch (mode) {
-                    ThemeMode.system => 'Follow system',
-                    ThemeMode.light => 'Light',
-                    ThemeMode.dark => 'Dark',
-                  }),
-                ),
-              )
-              .toList(),
-          onChanged: (value) {
-            if (value != null) {
-              setState(() => _theme = value);
-            }
-          },
-        ),
-        const SizedBox(height: 24),
-        const Text(
-          'Local by default. No account, cloud connection, or online subtitle requests are used in this build.',
-        ),
-        const SizedBox(height: 16),
-        const Text(
-          'Manual addresses and appearance stay in memory for this session. Pairing and trusted-device storage are not available yet.',
-        ),
-      ],
+    6 => SettingsPage(
+      theme: _theme,
+      onThemeChanged: (value) => setState(() => _theme = value),
+      updates: _updates,
+      readingVersion: _readingVersion,
+      onRetryVersion: _loadInstalledVersion,
+      appPlatform: widget.appPlatform,
     ),
     _ => _PlannedPage(index: _selected),
   };

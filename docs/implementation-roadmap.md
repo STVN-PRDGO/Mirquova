@@ -34,3 +34,5 @@ Limit initial implementation to infrastructure and discovery. Use source-plan co
 ## Current progress
 
 Preview 03 completes local infrastructure builds and adds opted-in, expiring LAN presence. Physical two-device discovery remains outstanding. Pairing has a design review but no implementation; see iteration-03.md and pairing-design-review.md.
+
+The requested app-update slice adds consented stable-release checks and an explicit browser handoff in Settings. It does not complete Distribution: signed packages, installers, artifact verification and installation QA remain pending. See app-updates.md for the release contract and verification limits.

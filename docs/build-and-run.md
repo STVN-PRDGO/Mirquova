@@ -78,6 +78,19 @@ The app loads libmirquova_core.so from jniLibs. Android Activity code acquires a
 
 .github/workflows/ci.yml provides Windows Rust/Flutter checks and a separate ARM64 Android native/debug build job. It runs on pushes and pull requests in the GitHub repository. Inspect the Actions run for remote results; local verification is recorded separately in iteration-03.md.
 
+## App update checks
+
+Settings > System updates reads the installed app version locally. Check for updates asks permission to contact GitHub; no release request runs at startup. Development and automated verification use offline release fixtures unless a person explicitly opts into a live check. See [App updates](app-updates.md) for the release-tag contract and manual installation workflow. Production signing and installation QA remain outstanding.
+
+The offline native bridge test can be run on Windows after loading the toolchain environment:
+
+```powershell
+cd apps/mirquova_flutter
+flutter --suppress-analytics --no-version-check test integration_test/native_app_platform_test.dart -d windows --no-pub
+```
+
+It reads installed metadata, opens Settings, cancels update consent and rejects invalid browser URLs without contacting the release API or opening a browser.
+
 ## Notices
 
 With dependencies resolved and FLUTTER_ROOT set:
