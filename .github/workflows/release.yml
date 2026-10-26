@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag name (e.g. v0.3.0)'
+        required: true
+        default: 'v0.3.0'
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Build Windows Release Package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+      - name: Build Rust core release library
+        run: cargo build -p mirquova-core --lib --release --locked
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.8'
+          channel: stable
+          cache: true
+      - name: Get Flutter dependencies
+        working-directory: apps/mirquova_flutter
+        run: flutter pub get --enforce-lockfile
+      - name: Build Flutter Windows release runner
+        working-directory: apps/mirquova_flutter
+        shell: powershell
+        run: |
+          $env:MIRQUOVA_CORE_BUNDLE = "${{ github.workspace }}\target\release\mirquova_core.dll"
+          flutter build windows --release
+      - name: Package Windows ZIP
+        shell: powershell
+        run: |
+          Compress-Archive -Path apps/mirquova_flutter/build/windows/x64/runner/Release/* -DestinationPath Mirquova-preview-windows-x64.zip
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: Mirquova-preview-windows-x64.zip
+
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+          targets: aarch64-linux-android
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.8'
+          channel: stable
+      - name: Setup Android NDK and cargo-ndk
+        run: |
+          sdkmanager 'ndk;28.2.13676358'
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build native Rust Android core
+        run: |
+          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" cargo ndk -t arm64-v8a --platform 24 -o apps/mirquova_flutter/android/app/src/main/jniLibs build --lib --release --locked
+      - name: Get Flutter dependencies
+        working-directory: apps/mirquova_flutter
+        run: flutter pub get --enforce-lockfile
+      - name: Build Flutter Android APK
+        working-directory: apps/mirquova_flutter
+        run: flutter build apk --debug --target-platform android-arm64
+      - name: Copy Android APK
+        run: cp apps/mirquova_flutter/build/app/outputs/flutter-apk/app-debug.apk Mirquova-preview-android-arm64-debug.apk
+      - name: Upload Android Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: Mirquova-preview-android-arm64-debug.apk
+
+  publish:
+    name: Publish GitHub Release
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Windows package
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+      - name: Download Android package
+        uses: actions/download-artifact@v4
+        with:
+          name: android-release
+      - name: Determine tag name
+        id: release_tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            echo "tag=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+      - name: Create or Update GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release_tag.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            Mirquova-preview-windows-x64.zip \
+            Mirquova-preview-android-arm64-debug.apk \
+            --title "Mirquova Preview $TAG" \
+            --notes "### Mirquova Preview $TAG
+
+          #### Downloads
+          - **Windows (x64)**: Download \`Mirquova-preview-windows-x64.zip\`, extract completely into a folder, and run \`mirquova.exe\`. Keep all DLLs in the extracted folder.
+          - **Android (ARM64)**: Download \`Mirquova-preview-android-arm64-debug.apk\` and install on Android 7.0+ (ARM64).
+
+          #### Notes
+          - This preview includes local Wi-Fi discovery (mDNS scanning and visibility).
+          - Unsigned development preview for testing purposes."
