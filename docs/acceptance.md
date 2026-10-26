@@ -26,7 +26,7 @@ Current preview: 03 (0.2.0+2). Detailed evidence: [iteration-03.md](iteration-03
 | Rust Windows core | ABI v2 DLL, unit/network tests, release build | Broader host/device validation |
 | Discovery/visibility | Bounded scans, explicit expiring presence, same-host resolution | Two physical devices and Android runtime |
 | Manual fallback | Private IPv4 candidate validation/removal | Connection and identity verification |
-| Pairing/trust | Design review; NOT IMPLEMENTED | Authenticated protocol, key storage, adversarial tests |
+| Pairing/trust | Design review and bounded invitation input parser; authentication NOT IMPLEMENTED | Authenticated protocol, key storage, adversarial tests |
 | Transfer/casting | NOT IMPLEMENTED | Authenticated consent-scoped engines |
 | Android phone | ARM64 debug APK verified | Device installation, permissions, LAN checks |
 | ACE DE1L LED-909 | UNVERIFIED HARDWARE | OS/ABI, install, remote and decoder tests |

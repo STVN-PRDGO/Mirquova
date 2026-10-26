@@ -1,5 +1,7 @@
 # Mirquova
 
+[![Foundation checks](https://github.com/STVN-PRDGO/Mirquova/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/STVN-PRDGO/Mirquova/actions/workflows/ci.yml)
+
 Every screen. One connection.
 
 A Flutter Windows/Android app with a Rust LAN discovery core. Preview 03 (0.2.0+2) adds explicit, time-limited visibility: choose a name, advertise for up to two minutes, and hide at any time. Nearby candidates remain unverified.
@@ -11,7 +13,7 @@ A Flutter Windows/Android app with a Rust LAN discovery core. Preview 03 (0.2.0+
 - Hidden by default. Visibility requires consent, uses a random process identifier, and stops when the app backgrounds. Scans and visibility share Android multicast access.
 - Versioned C/Dart FFI with owned snapshots. Self-announcements are excluded from results.
 
-Visibility announces presence only; it opens no pairing or transfer endpoint. Manual addresses are not contacted. Pairing, transfer, casting, playback, persistent history, and online subtitles remain planned. See the [pairing design review](docs/pairing-design-review.md) for the next protocol work.
+Visibility announces presence only; it opens no pairing or transfer endpoint. Manual addresses are not contacted. Pairing, transfer, casting, playback, persistent history, and online subtitles remain planned. Rust also contains a bounded, untrusted [invitation parser](shared/contracts/pairing-invitation.md) as pairing groundwork; it is not exposed in the app. See the [pairing design review](docs/pairing-design-review.md) for transport and identity gates.
 
 ## Build and check
 
@@ -24,9 +26,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Android.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-Windows.ps1
 ```
 
-Local verification: 12 Rust unit tests, two explicitly enabled same-host network tests, 24 Flutter tests, and one actual Windows integration test passed. Formatting, clippy, and Flutter analysis passed. Windows release and Android ARM64 debug builds passed; APK signature, contents, and alignment were checked. Android installation and discovery between two physical devices remain unverified.
+Preview 03 local verification: 12 Rust unit tests, two explicitly enabled same-host network tests, 24 Flutter tests, and one actual Windows integration test passed. Formatting, clippy, and Flutter analysis passed. Windows release and Android ARM64 debug builds passed; APK signature, contents, and alignment were checked. Android installation and discovery between two physical devices remain unverified.
 
-GitHub Actions checks the Windows foundation and Android ARM64 debug build on pushes and pull requests. Local preview packages live under ignored `artifacts/iteration-03/`; they are not GitHub release downloads. See [Preview 03 results](docs/iteration-03.md) for checksums and evidence.
+The invitation groundwork adds 10 Rust input-validation and expiry tests. GitHub Actions checks the Windows foundation and Android ARM64 debug build on pushes and pull requests. Local preview packages live under ignored `artifacts/iteration-03/`; they are not GitHub release downloads. See [Preview 03 results](docs/iteration-03.md) for checksums and evidence.
 
 ## Documentation
 

@@ -38,3 +38,7 @@ A short numeric pairing mode remains deferred until a reviewed PAKE/channel-bind
 - Two-process and then two-physical-device tests; no live device support claims from fixtures.
 
 The original protocol specification was not supplied. This is an independently derived proposal, not a recovered specification or a security clearance. Implement and review the smallest authenticated pairing slice before opening any file/capture/media service.
+
+## Input-validation groundwork
+
+The Rust core now includes a [bounded invitation parser](../shared/contracts/pairing-invitation.md) for an independently proposed bootstrap JSON format. Ten tests cover malformed/oversized input, duplicate and unknown fields, unsupported versions/purposes, endpoint restrictions, pin/secret encoding, local TTL boundaries, and diagnostic redaction. This does not add a pairing endpoint or trusted peer. Client-local lifetime cannot establish invitation age, server expiry, or replay protection.
