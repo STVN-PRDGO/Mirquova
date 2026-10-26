@@ -30,6 +30,8 @@ class FfiDiscoveryApi implements NativeDiscoveryApi {
         ? override
         : Platform.isWindows
         ? '${File(Platform.resolvedExecutable).parent.path}/mirquova_core.dll'
+        : Platform.isMacOS
+        ? '${File(Platform.resolvedExecutable).parent.parent.path}/Frameworks/libmirquova_core.dylib'
         : 'libmirquova_core.so';
     final library = DynamicLibrary.open(path);
     if (library.lookupFunction<_Version, int Function()>('mq_abi_version')() !=

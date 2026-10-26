@@ -2,6 +2,10 @@
 from pathlib import Path
 import argparse,ctypes,hashlib,json,os,re,shutil,subprocess,zipfile
 ROOT=Path(__file__).resolve().parent.parent
+pubspec=(ROOT/'apps/mirquova_flutter/pubspec.yaml').read_text(encoding='utf-8')
+version_match=re.search(r'^version:\s*([0-9]+\.[0-9]+\.[0-9]+(?:\+[0-9]+)?)\s*$',pubspec,re.MULTILINE)
+if not version_match:raise SystemExit('Expected a stable numeric app version in pubspec.yaml')
+version=version_match.group(1)
 windows=ROOT/'apps/mirquova_flutter/build/windows/x64/runner/Release'
 apk=ROOT/'apps/mirquova_flutter/build/app/outputs/flutter-apk/app-debug.apk'
 required=[windows/'mirquova.exe',windows/'mirquova_core.dll',windows/'flutter_windows.dll',apk]
@@ -31,19 +35,27 @@ if not re.fullmatch(r'iteration-[0-9]{2}',args.iteration):raise SystemExit('Inva
 destination=ROOT/'artifacts'/args.iteration
 if destination.exists():raise SystemExit('Refusing to overwrite existing preview artifacts')
 destination.mkdir(parents=True)
-readme='''Mirquova preview 0.2.0 - foundation and discovery only.
+readme=f'''Mirquova preview {version} - LAN discovery and manual app update checks.
 
 Windows: extract the complete Windows ZIP into one folder, then run mirquova.exe.
-Keep data and both DLLs beside the executable. This is an unsigned development preview.
-Android: ARM64 debug-signed phone APK, Android 7/API 24 or later. No TV validation.
+Keep the entire extracted folder together, including data and all DLLs.
+Close Mirquova before replacing an existing Windows app folder.
+This portable Windows app is an unsigned development preview, without an installer.
+Android: download the ARM64 debug-signed phone APK and open it on the phone.
+Use Android's installer prompts to allow installation from the chosen download source.
+Requires Android 7/API 24 or later. Physical Android and TV validation remain pending.
 
 Pairing, transfers, casting, playback and online subtitles are not implemented.
 Scan nearby browses for six seconds. Make discoverable shares a chosen name for up to two minutes.
 Hide now or hiding/closing the app stops visibility. No transport endpoint is offered.
 Use this updated preview on both devices; the earlier discovery contract is incompatible.
 Manual addresses are session-only candidates and are not contacted or trusted.
+Settings > System updates asks permission before checking GitHub for a stable release.
+A newer release offers release notes and a browser link; downloading and installing are manual.
+There are no automatic update requests, package downloads or package installation.
 
-Source and repeatable build/test instructions are in D:/Mirquova.
+Source: https://github.com/STVN-PRDGO/Mirquova
+Build/test instructions: https://github.com/STVN-PRDGO/Mirquova/blob/main/docs/build-and-run.md
 Original dependency/native engine notices accompany these previews.
 No institutional affiliation, code licensing choice or store release is implied.
 '''
@@ -64,4 +76,5 @@ for path in [archive_path,destination/'Mirquova-preview-android-arm64-debug.apk'
     with path.open('rb') as source:digest=hashlib.file_digest(source,'sha256').hexdigest()
     manifest.append({'file':path.name,'bytes':path.stat().st_size,'sha256':digest})
 (destination/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
+(destination/'SHA256SUMS.txt').write_text(''.join(f"{entry['sha256']}  {entry['file']}\n" for entry in manifest),encoding='utf-8')
 print(json.dumps(manifest,indent=2))

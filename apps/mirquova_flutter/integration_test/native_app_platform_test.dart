@@ -10,6 +10,7 @@ import 'package:mirquova/adapters/native_app_platform.dart';
 import 'package:mirquova/adapters/native_discovery.dart';
 import 'package:mirquova/app.dart';
 import 'package:mirquova/core/app_updates.dart';
+import 'package:mirquova/core/discovery_port.dart';
 
 class _NoNetworkUpdates implements UpdateSource {
   int requests = 0;
@@ -36,11 +37,17 @@ void main() {
     expect(info.buildNumber, matches(RegExp(r'^[0-9]+$')));
 
     final updates = _NoNetworkUpdates();
+    final discovery = NativeDiscovery();
+    expect(
+      discovery.snapshot.status,
+      DiscoveryStatus.idle,
+      reason: 'The bundled native core must load through its default platform path.',
+    );
     final boundary = GlobalKey();
     await tester.pumpWidget(
       RepaintBoundary(
         key: boundary,
-        child: MirquovaApp(discovery: NativeDiscovery(), updateSource: updates),
+        child: MirquovaApp(discovery: discovery, updateSource: updates),
       ),
     );
     await tester.pumpAndSettle();

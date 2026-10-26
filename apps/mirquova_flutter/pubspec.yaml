@@ -1,7 +1,7 @@
 name: mirquova
 description: Local-first device discovery foundation for Mirquova.
 publish_to: none
-version: 0.2.0+2
+version: 0.3.0+3
 environment:
   sdk: ^3.13.7
 dependencies:
