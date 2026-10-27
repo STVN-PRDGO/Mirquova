@@ -96,6 +96,15 @@ void main() {
     ),
   );
 
+  Future<void> readInvitation(WidgetTester tester) async {
+    final button = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'Read invitation'),
+    );
+    expect(button.onPressed, isNotNull);
+    button.onPressed!.call();
+    await tester.pump();
+  }
+
   testWidgets('host invitation shows a QR code and comparison fingerprint', (
     tester,
   ) async {
@@ -140,9 +149,7 @@ void main() {
     await tester.pumpWidget(page());
     final invitationField = find.widgetWithText(TextField, 'Invitation text');
     await tester.enterText(invitationField, _invitation);
-    await tester.ensureVisible(find.text('Read invitation'));
-    await tester.tap(find.text('Read invitation'));
-    await tester.pump();
+    await readInvitation(tester);
     await tester.ensureVisible(find.byType(CheckboxListTile));
     await tester.tap(find.byType(CheckboxListTile));
     await tester.pump();
@@ -172,9 +179,7 @@ void main() {
       find.widgetWithText(TextField, 'Invitation text'),
       _invitation,
     );
-    await tester.ensureVisible(find.text('Read invitation'));
-    await tester.tap(find.text('Read invitation'));
-    await tester.pump();
+    await readInvitation(tester);
 
     final request = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Verify and request pairing'),
@@ -205,10 +210,8 @@ void main() {
   ) async {
     await tester.pumpWidget(page());
     final invitationField = find.widgetWithText(TextField, 'Invitation text');
-    await tester.enterText(invitationField, _invitation);
-    await tester.ensureVisible(find.text('Read invitation'));
-    await tester.tap(find.text('Read invitation'));
-    await tester.pump();
+    await tester.enterText(invitationField, '$_invitation ');
+    await readInvitation(tester);
     await tester.ensureVisible(find.byType(CheckboxListTile));
     await tester.tap(find.byType(CheckboxListTile));
     await tester.pump();
@@ -221,17 +224,12 @@ void main() {
       isNotNull,
     );
 
-    await tester.enterText(invitationField, _invitation);
-    await tester.ensureVisible(find.text('Read invitation'));
-    await tester.tap(find.text('Read invitation'));
+    await tester.enterText(invitationField, '$_invitation ');
     await tester.pump();
+    expect(find.byType(CheckboxListTile), findsNothing);
     expect(
-      tester
-          .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Verify and request pairing'),
-          )
-          .onPressed,
-      isNull,
+      find.widgetWithText(FilledButton, 'Verify and request pairing'),
+      findsNothing,
     );
   });
 
@@ -244,9 +242,7 @@ void main() {
       invitationField,
       _invitation.replaceFirst('"ttl_seconds":120', '"ttl_seconds":1'),
     );
-    await tester.ensureVisible(find.text('Read invitation'));
-    await tester.tap(find.text('Read invitation'));
-    await tester.pump();
+    await readInvitation(tester);
 
     await tester.ensureVisible(find.byType(CheckboxListTile));
     await tester.tap(find.byType(CheckboxListTile));
