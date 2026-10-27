@@ -243,11 +243,12 @@ jobs:
           #### Downloads
           - **Windows (x64)**: Extract `Mirquova-preview-windows-x64.zip` completely and run `mirquova.exe`. Keep all bundled files together.
           - **Android (ARM64)**: Install `Mirquova-preview-android-arm64-debug.apk`. This is a debug-signed phone preview.
-          - **macOS (Apple Silicon)**: Extract `Mirquova-preview-macos-arm64.zip` and move `mirquova.app` to Applications. The app is signed ad hoc and is not notarized; macOS may require explicit approval in Privacy & Security. Intel Macs are not supported by this package.
+          - **macOS (Apple Silicon)**: Extract `Mirquova-preview-macos-arm64.zip` and move `mirquova.app` to Applications. If Apple cannot verify the app, click **Done**, then **System Settings → Privacy & Security → Open Anyway** for mirquova and confirm **Open**. The preview is signed ad hoc and is not notarized. Intel Macs are not supported by this package.
           - **Linux (x64)**: Extract `Mirquova-preview-linux-x64.tar.gz`, keep the entire bundle together, and run `./mirquova`. Built on Ubuntu 24.04; requires GTK3 and compatible system libraries.
           - **iOS (ARM64)**: `Mirquova-preview-ios-arm64-unsigned.zip` contains an unsigned device app for development. It is not an installable IPA. Apple signing/provisioning and multicast entitlement approval are required for device discovery builds; see the source build instructions.
 
           #### Notes
+          - For this trusted macOS preview only, an alternative is to run `xattr -dr com.apple.quarantine /Applications/mirquova.app` followed by `open /Applications/mirquova.app` in Terminal. This removes quarantine only from this app; it does not notarize it or disable Gatekeeper globally. Changing the archive format does not resolve notarization.
           - Preview functionality includes consented LAN presence and discovery of unverified candidates. Pairing, transfers, casting and playback remain unavailable.
           - Native builds do not establish physical-device installation, permission behavior or two-device discovery. Production signing and distribution QA remain pending.
           - macOS, Linux and iOS packages include third-party notices and adjacent SHA-256 checksum files.

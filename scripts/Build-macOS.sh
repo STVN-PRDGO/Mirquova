@@ -107,7 +107,19 @@ Extract the ZIP, then move mirquova.app to Applications and open it.
 Keep the complete .app bundle together.
 
 This preview is signed ad hoc and has not been notarized by Apple.
-macOS may require explicit approval in System Settings > Privacy & Security.
+If macOS says Apple could not verify mirquova, click Done, then go to
+System Settings > Privacy & Security and click Open Anyway for mirquova.
+Confirm Open when prompted. This approves this app individually.
+
+For this trusted preview only, an alternative after moving the app to
+Applications is to run these two commands in Terminal:
+  xattr -dr com.apple.quarantine /Applications/mirquova.app
+  open /Applications/mirquova.app
+This removes download quarantine from this app; it does not notarize it.
+It does not disable Gatekeeper for other apps. ZIP, DMG and PKG downloads
+all remain subject to macOS security checks. Developer ID signing and
+Apple notarization are required to resolve this for future downloads.
+
 Physical Mac installation, local-network permission behavior and two-device
 discovery remain unverified. Intel Macs are not supported by this package.
 

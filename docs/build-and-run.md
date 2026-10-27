@@ -30,6 +30,19 @@ CI now includes Linux/macOS checks and packaging, unsigned iOS device/simulator 
 
 On macOS/Linux, verify an Android build with `python3 scripts/verify_apk.py` after activating the toolchains. It checks the ARM64 Rust/Flutter payload, signature and 16 KiB ZIP alignment. Override `MIRQUOVA_ANDROID_BUILD_TOOLS` if using a build-tools version other than 36.0.0.
 
+### Opening the macOS preview when Gatekeeper blocks it
+
+The macOS preview is signed ad hoc, without Apple notarization. ZIP, DMG or PKG packaging does not remove Gatekeeper's checks. For a preview you trust, extract it, move `mirquova.app` into Applications and attempt to open it. If Apple cannot verify it, click **Done**, then **System Settings → Privacy & Security → Open Anyway** for mirquova, and confirm **Open**. See [Apple's instructions for opening an unnotarized app](https://support.apple.com/en-gb/102445).
+
+As an alternative for this specific trusted preview, run in Terminal:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/mirquova.app
+open /Applications/mirquova.app
+```
+
+This removes download quarantine only from this app. It does not notarize the app or disable Gatekeeper globally. If you installed it elsewhere, substitute its exact path in both commands. Future downloads still need approval until the distribution workflow uses a Developer ID Application certificate and Apple notarization; see [Apple's notarization requirements](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution). No Developer ID credentials or notarization configuration are currently provided by this repository. The commands above are manual instructions, not an automatic action during download or installation.
+
 ## Local toolchains
 
 This workstation has project-local Flutter 3.47.8 / Dart 3.13.7 and Rust 1.99.1 (Windows GNU) under .toolchains. Nothing was added to global PATH. A portable GNU linker is used for Rust. Microsoft C++ Build Tools and the Windows SDK are now installed for Flutter's Windows runner. The project-local Android SDK/NDK and JDK are also installed; both native builds succeed. See iteration-02.md for versions and evidence. Local SDK paths are ignored by version control.
