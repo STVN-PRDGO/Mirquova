@@ -657,17 +657,41 @@ fn connect_interruptibly(
     socket.set_nonblocking(true)?;
     match socket.connect(&(*address).into()) {
         Ok(()) => {}
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
-            ) => {}
+        Err(error) if connect_is_pending(&error) => {}
         Err(error) => return Err(error),
     }
 
     wait_for_connect(&socket, Instant::now() + timeout, cancel)?;
     socket.set_nonblocking(false)?;
     Ok(socket.into())
+}
+
+fn connect_is_pending(error: &io::Error) -> bool {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+    ) {
+        return true;
+    }
+    // Nonblocking connect reports EINPROGRESS (and occasionally EALREADY)
+    // using raw OS errors rather than ErrorKind::WouldBlock on these targets.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        matches!(error.raw_os_error(), Some(115 | 114))
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        matches!(error.raw_os_error(), Some(36 | 37))
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    )))]
+    {
+        false
+    }
 }
 
 fn wait_for_connect(socket: &Socket, deadline: Instant, cancel: &AtomicBool) -> io::Result<()> {
