@@ -13,6 +13,23 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - name: Select private IPv4 interface for pairing transport tests
+        shell: pwsh
+        run: |
+          $address = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+            ForEach-Object { $_.GetIPProperties().UnicastAddresses } |
+            ForEach-Object { $_.Address } |
+            Where-Object {
+              if ($_.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) { return $false }
+              $bytes = $_.GetAddressBytes()
+              if ($bytes[0] -eq 10 -or
+                  ($bytes[0] -eq 192 -and $bytes[1] -eq 168) -or
+                  ($bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31)) {
+                $_.ToString()
+              }
+            } | Select-Object -First 1
+          if (-not $address) { throw 'No RFC1918 IPv4 interface is available for pairing tests.' }
+          "MIRQUOVA_PAIRING_TEST_IPV4=$address" >> $env:GITHUB_ENV
       - name: Same-host TLS pairing transport
         run: cargo test -p mirquova-core --locked pairing_transport::tests::local_private_interface_pairing_ -- --ignored --test-threads=1
       - run: cargo build -p mirquova-core --lib --locked
@@ -109,6 +126,39 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - if: runner.os == 'Linux'
+        name: Select private IPv4 interface for pairing transport tests
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import ipaddress
+          import subprocess
+
+          networks = tuple(map(ipaddress.ip_network, ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")))
+          output = subprocess.check_output(["ip", "-o", "-4", "addr", "show"], text=True)
+          addresses = [line.split()[3].split("/")[0] for line in output.splitlines()]
+          address = next((value for value in addresses if ipaddress.ip_address(value) in networks), None)
+          if address is None:
+              raise SystemExit("No RFC1918 IPv4 interface is available for pairing tests.")
+          print(f"MIRQUOVA_PAIRING_TEST_IPV4={address}")
+          PY
+      - if: runner.os == 'macOS'
+        name: Select private IPv4 interface for pairing transport tests
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import ipaddress
+          import re
+          import subprocess
+
+          networks = tuple(map(ipaddress.ip_network, ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")))
+          output = subprocess.check_output(["/sbin/ifconfig", "-a"], text=True)
+          addresses = re.findall(r"\binet (\d+(?:\.\d+){3})\b", output)
+          address = next((value for value in addresses if ipaddress.ip_address(value) in networks), None)
+          if address is None:
+              raise SystemExit("No RFC1918 IPv4 interface is available for pairing tests.")
+          print(f"MIRQUOVA_PAIRING_TEST_IPV4={address}")
+          PY
       - name: Same-host TLS pairing transport
         run: cargo test -p mirquova-core --locked pairing_transport::tests::local_private_interface_pairing_ -- --ignored --test-threads=1
       - run: cargo build -p mirquova-core --lib --locked
