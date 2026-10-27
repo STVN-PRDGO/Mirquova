@@ -130,9 +130,9 @@ jobs:
         name: Select private IPv4 interface for pairing transport tests
         shell: bash
         run: |
-          address="$(hostname -I 2>/dev/null | tr ' ' '\n' | awk '/^10\./ || /^192\.168\./ || /^172\.(1[6-9]|2[0-9]|3[01])\./ { print; exit }')"
+          address="$(ip -o -4 addr show scope global 2>/dev/null | awk '$3 == "inet" { split($4, item, "/"); ip=item[1]; if (ip ~ /^10\./ || ip ~ /^192\.168\./ || ip ~ /^172\.(1[6-9]|2[0-9]|3[01])\./) { print ip; exit } }')"
           if [[ -z "$address" ]]; then
-            address="$(ip -o -4 addr show 2>/dev/null | awk '$3 == "inet" { split($4, item, "/"); ip=item[1]; if (ip ~ /^10\./ || ip ~ /^192\.168\./ || ip ~ /^172\.(1[6-9]|2[0-9]|3[01])\./) { print ip; exit } }')"
+            address="$(hostname -I 2>/dev/null | tr ' ' '\n' | awk '/^10\./ || /^192\.168\./ || /^172\.(1[6-9]|2[0-9]|3[01])\./ { print; exit }')"
           fi
           if [[ -z "$address" ]]; then
             echo 'No RFC1918 IPv4 interface is available for pairing tests.' >&2
