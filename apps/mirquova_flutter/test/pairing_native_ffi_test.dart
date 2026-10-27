@@ -81,14 +81,15 @@ void main() {
             .map((address) => address.address)
             .where((address) => ManualEndpoint.parse(address, '1') != null)
             .firstOrNull;
-        expect(
-          address,
-          isNotNull,
-          reason: 'A private IPv4 interface is required.',
-        );
+        if (address == null) {
+          markTestSkipped(
+            'No RFC1918 IPv4 interface is available on this runner.',
+          );
+          return;
+        }
 
         final payload = pairing.startHost(
-          localIpv4: address!,
+          localIpv4: address,
           port: 0,
           hostAlias: 'FFI probe',
           identity: identity,

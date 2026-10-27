@@ -5,6 +5,9 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 source scripts/Use-Toolchains.sh
 [[ "$(uname -s)" == Darwin ]] || { echo 'iOS builds require macOS and full Xcode.' >&2; exit 1; }
 xcrun --sdk iphoneos --show-sdk-path >/dev/null
+# Keep Rust's linker target aligned with Runner.xcodeproj. Rust defaults to
+# iOS 10, but AWS-LC's Apple object files reference symbols exposed from iOS 13.
+export IPHONEOS_DEPLOYMENT_TARGET=15.0
 mode="${1:-device}"
 case "$mode" in
   device|ipa) rust_target=aarch64-apple-ios ;;
