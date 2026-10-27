@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../core/app_platform.dart';
+import '../../adapters/package_updates.dart';
 import '../../core/app_updates.dart';
 
 class SystemUpdatesCard extends StatefulWidget {
@@ -9,13 +9,13 @@ class SystemUpdatesCard extends StatefulWidget {
     required this.updates,
     required this.readingVersion,
     required this.onRetryVersion,
-    required this.appPlatform,
+    required this.packages,
   });
 
   final UpdateController? updates;
   final bool readingVersion;
   final VoidCallback onRetryVersion;
-  final AppPlatform appPlatform;
+  final PackageUpdates packages;
 
   @override
   State<SystemUpdatesCard> createState() => _SystemUpdatesCardState();
@@ -23,13 +23,10 @@ class SystemUpdatesCard extends StatefulWidget {
 
 class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
   bool _askingPermission = false;
-  bool _openingRelease = false;
-  String? _openError;
 
   Future<void> _check(UpdateController updates) async {
     setState(() {
       _askingPermission = true;
-      _openError = null;
     });
     final allowed = await showDialog<bool>(
       context: context,
@@ -57,36 +54,16 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
     if (allowed == true) await updates.check();
   }
 
-  Future<void> _openRelease(UpdateRelease release) async {
-    setState(() {
-      _openingRelease = true;
-      _openError = null;
-    });
-    try {
-      await widget.appPlatform.openReleasePage(release.pageUrl);
-    } on Exception {
-      if (mounted) {
-        setState(() {
-          _openError = 'The release page could not be opened. Try again or copy the address below into your browser.';
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _openingRelease = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final updates = widget.updates;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: updates == null
-            ? _content(context, null)
-            : ListenableBuilder(
-                listenable: updates,
-                builder: (context, _) => _content(context, updates),
-              ),
+        child: ListenableBuilder(
+          listenable: Listenable.merge([updates, widget.packages]),
+          builder: (context, _) => _content(context, updates),
+        ),
       ),
     );
   }
@@ -161,7 +138,7 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
             ),
           const SizedBox(height: 8),
           const Text(
-            'Check the release page for a package compatible with your device and follow its installation steps. Close Mirquova before replacing the Windows app folder. On Android, follow the system installer prompts.',
+            'Download the update here, then open the package to finish with your system. Desktop previews require closing Mirquova and replacing the complete app bundle. Android requires system installation approval.',
           ),
         ],
         const SizedBox(height: 16),
@@ -174,7 +151,7 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
                   updates == null ||
                       checking ||
                       _askingPermission ||
-                      _openingRelease
+                      widget.packages.busy
                   ? null
                   : () => _check(updates),
               icon: const Icon(Icons.system_update_outlined),
@@ -185,16 +162,6 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
                 onPressed: updates!.cancel,
                 child: const Text('Cancel check'),
               ),
-            if (release != null)
-              OutlinedButton.icon(
-                onPressed: _openingRelease || _askingPermission
-                    ? null
-                    : () => _openRelease(release),
-                icon: const Icon(Icons.open_in_new_outlined),
-                label: Text(
-                  _openingRelease ? 'Opening browser...' : 'Open release page',
-                ),
-              ),
             if (updates == null && !widget.readingVersion)
               OutlinedButton(
                 onPressed: widget.onRetryVersion,
@@ -202,15 +169,106 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
               ),
           ],
         ),
-        if (_openError != null && release != null) ...[
-          const SizedBox(height: 16),
-          Semantics(liveRegion: true, child: Text(_openError!)),
-          const SizedBox(height: 8),
-          SelectableText(release.pageUrl.toString()),
+        if (release != null) ...[
+          const SizedBox(height: 20),
+          _PackagePanel(release: release, packages: widget.packages),
         ],
         const SizedBox(height: 16),
         const Text(
-          'Update checks are optional. Downloads and installation start only when you choose them on GitHub.',
+          'Checks and downloads are optional. No browser is required. Your system handles the final installation.',
+        ),
+      ],
+    );
+  }
+}
+
+class _PackagePanel extends StatelessWidget {
+  const _PackagePanel({required this.release, required this.packages});
+  final UpdateRelease release;
+  final PackageUpdates packages;
+
+  Future<void> _download(BuildContext context, UpdateAsset asset) async {
+    final allowed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Download this update?'),
+        content: Text(
+          'Download ${(asset.size / (1024 * 1024)).toStringAsFixed(1)} MB from GitHub and its release storage. The download is checked against its published SHA-256 digest. Installation starts only when you open the completed package.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Download now'),
+          ),
+        ],
+      ),
+    );
+    if (allowed == true && context.mounted) await packages.download(asset);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final asset = packages.compatibleAsset(release);
+    if (asset == null) {
+      return Text(
+        packages.platform.packageName == null
+            ? 'In-app package updates are unavailable for this platform. Use your installation provider to update.'
+            : 'This release has no compatible package with a published integrity digest. Try checking again after a package is published.',
+      );
+    }
+    final current = packages.asset?.url == asset.url;
+    final ready = current && packages.status == PackageStatus.ready;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Update download', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Text(
+          '${(asset.size / (1024 * 1024)).toStringAsFixed(1)} MB • SHA-256 checked',
+        ),
+        if (current && packages.message != null) ...[
+          const SizedBox(height: 8),
+          Semantics(liveRegion: true, child: Text(packages.message!)),
+        ],
+        if (current && packages.status == PackageStatus.downloading) ...[
+          const SizedBox(height: 12),
+          LinearProgressIndicator(
+            value: packages.progress,
+            semanticsLabel: 'Downloading update',
+          ),
+          const SizedBox(height: 8),
+          Text('${((packages.progress ?? 0) * 100).floor()}% downloaded'),
+        ],
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            FilledButton.icon(
+              onPressed: packages.busy ? null : () => _download(context, asset),
+              icon: const Icon(Icons.download_outlined),
+              label: Text(ready ? 'Download again' : 'Download update'),
+            ),
+            if (packages.status == PackageStatus.downloading)
+              OutlinedButton(
+                onPressed: packages.cancel,
+                child: const Text('Cancel download'),
+              ),
+            if (ready || (current && packages.status == PackageStatus.opening))
+              OutlinedButton.icon(
+                onPressed: packages.busy ? null : packages.open,
+                icon: const Icon(Icons.install_desktop_outlined),
+                label: Text(
+                  packages.status == PackageStatus.opening
+                      ? 'Opening package...'
+                      : 'Open downloaded update',
+                ),
+              ),
+          ],
         ),
       ],
     );

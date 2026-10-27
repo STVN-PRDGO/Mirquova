@@ -64,11 +64,58 @@ class UpdateRelease {
     required this.version,
     required this.pageUrl,
     this.notes = '',
+    this.assets = const [],
   });
 
   final AppVersion version;
   final Uri pageUrl;
   final String notes;
+  final List<UpdateAsset> assets;
+}
+
+/// An uploaded package, bound to the release tag and its published digest.
+@immutable
+class UpdateAsset {
+  const UpdateAsset({
+    required this.name,
+    required this.url,
+    required this.size,
+    required this.sha256,
+  });
+  final String name;
+  final Uri url;
+  final int size;
+  final String sha256;
+  static const maxBytes = 1024 * 1024 * 1024;
+
+  static UpdateAsset? parse(Object? value, String tag) {
+    if (value is! Map<String, dynamic>) return null;
+    final name = value['name'];
+    final size = value['size'];
+    final digest = value['digest'];
+    if (name is! String ||
+        !RegExp(r'^Mirquova-preview-[a-z0-9-]+\.(zip|apk|tar\.gz)$')
+            .hasMatch(name) ||
+        size is! int ||
+        size <= 0 ||
+        size > maxBytes ||
+        value['state'] != 'uploaded' ||
+        digest is! String ||
+        !RegExp(r'^sha256:[0-9a-f]{64}$').hasMatch(digest)) {
+      return null;
+    }
+    final expected = Uri.https(
+      'github.com',
+      '/STVN-PRDGO/Mirquova/releases/download/$tag/$name',
+    );
+    if (value['browser_download_url'] != expected.toString()) return null;
+    return UpdateAsset(
+      name: name,
+      url: expected,
+      size: size,
+      sha256: digest.substring(7),
+    );
+  }
 }
 
 abstract interface class UpdateSource {

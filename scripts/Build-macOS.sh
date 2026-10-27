@@ -126,7 +126,8 @@ discovery remain unverified. Intel Macs are not supported by this package.
 Nearby discovery candidates are unverified. Pairing, transfer, casting,
 playback and online subtitles are not implemented.
 Settings > System updates offers an optional GitHub release check.
-Checks require consent; downloading and installing another release is manual.
+Checks and direct package downloads require consent in Settings; no GitHub page is needed.
+Open downloaded update opens the local archive. Close Mirquova before replacing the app bundle.
 
 Source, build instructions and platform status:
 https://github.com/STVN-PRDGO/Mirquova

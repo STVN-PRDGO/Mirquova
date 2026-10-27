@@ -152,6 +152,12 @@ class GitHubUpdateSource implements UpdateSource {
         '/STVN-PRDGO/Mirquova/releases/tag/$tag',
       ),
       notes: notes,
+      assets: [
+        if (value['assets'] is List)
+          for (final asset in (value['assets'] as List).take(128))
+            if (UpdateAsset.parse(asset, tag) case final UpdateAsset parsed)
+              parsed,
+      ],
     );
   }
 

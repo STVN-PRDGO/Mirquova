@@ -12,7 +12,7 @@ A Flutter app with a Rust LAN discovery core and runners for Windows, Android, m
 - Bounded six-second mDNS scans, cancellation, candidate updates/removal, and session-only manual private IPv4 entries.
 - Hidden by default. Visibility requires consent, uses a random process identifier, and stops when the app backgrounds. Scans and visibility share Android multicast access.
 - Versioned C/Dart FFI with owned snapshots. Self-announcements are excluded from results.
-- Settings includes manual, consented app update checks, release notes and a browser link to a newer GitHub release. See [App updates](docs/app-updates.md) for release requirements and installation limits.
+- Settings includes consented app update checks, release notes and direct package downloads without opening a GitHub page. See [App updates](docs/app-updates.md) for release requirements and installation limits.
 
 Visibility announces presence only; it opens no pairing or transfer endpoint. Manual addresses are not contacted. Pairing, transfer, casting, playback, persistent history, and online subtitles remain planned. Rust also contains a bounded, untrusted [invitation parser](shared/contracts/pairing-invitation.md) as pairing groundwork; it is not exposed in the app. See the [pairing design review](docs/pairing-design-review.md) for transport and identity gates.
 

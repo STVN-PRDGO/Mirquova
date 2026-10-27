@@ -4,6 +4,7 @@
 #include <shellapi.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -69,6 +70,40 @@ bool FlutterWindow::OnCreate() {
               {flutter::EncodableValue("buildNumber"),
                flutter::EncodableValue(std::to_string(FLUTTER_VERSION_BUILD))},
           }));
+        } else if (call.method_name() == "getUpdateDirectory" ||
+                   call.method_name() == "openUpdatePackage") {
+          namespace fs = std::filesystem;
+          std::error_code error;
+          const auto temporary = fs::temp_directory_path(error);
+          if (error) { result->Error("storage_unavailable", "Update storage is unavailable."); return; }
+          const auto root = temporary / "mirquova-updates";
+          fs::create_directories(root, error);
+          if (error) { result->Error("storage_unavailable", "Update storage is unavailable."); return; }
+          if (call.method_name() == "getUpdateDirectory") {
+            result->Success(flutter::EncodableValue(root.u8string()));
+            return;
+          }
+          const auto* argument = call.arguments();
+          const auto* path = argument ? std::get_if<std::string>(argument) : nullptr;
+          if (!path) { result->Error("invalid_package", "Invalid update package."); return; }
+          const auto file = fs::u8path(*path);
+          const auto canonical = fs::canonical(file, error);
+          if (error) { result->Error("invalid_package", "The update package is unavailable."); return; }
+          const auto canonical_root = fs::canonical(root, error);
+          if (error) { result->Error("storage_unavailable", "Update storage is unavailable."); return; }
+          const auto file_status = fs::symlink_status(file, error);
+          if (error || !fs::is_regular_file(file_status) ||
+              canonical.parent_path().parent_path() != canonical_root ||
+              canonical.parent_path().filename().string().rfind("download-", 0) != 0 ||
+              canonical.filename() != "Mirquova-preview-windows-x64.zip") {
+            result->Error("invalid_package", "Only a downloaded Mirquova update can be opened.");
+            return;
+          }
+          const HINSTANCE opened = ShellExecuteW(nullptr, L"open", canonical.c_str(),
+                                                 nullptr, nullptr, SW_SHOWNORMAL);
+          if (reinterpret_cast<INT_PTR>(opened) <= 32) {
+            result->Error("package_unavailable", "The downloaded package could not be opened.");
+          } else { result->Success(); }
         } else if (call.method_name() == "openReleasePage") {
           const auto* argument = call.arguments();
           const auto* url = argument ? std::get_if<std::string>(argument) : nullptr;

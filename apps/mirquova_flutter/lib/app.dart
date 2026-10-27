@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'adapters/github_updates.dart';
+import 'adapters/package_updates.dart';
 import 'adapters/native_app_platform.dart';
 import 'core/app_platform.dart';
 import 'core/app_updates.dart';
@@ -27,10 +28,12 @@ class MirquovaApp extends StatefulWidget {
     required this.discovery,
     this.appPlatform = const NativeAppPlatform(),
     this.updateSource,
+    this.packageUpdates,
   });
   final DiscoveryPort discovery;
   final AppPlatform appPlatform;
   final UpdateSource? updateSource;
+  final PackageUpdates? packageUpdates;
   @override
   State<MirquovaApp> createState() => _MirquovaAppState();
 }
@@ -41,10 +44,12 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
   final _manualEndpoints = <ManualEndpoint>[];
   UpdateController? _updates;
   bool _readingVersion = true;
+  late final PackageUpdates _packages;
 
   @override
   void initState() {
     super.initState();
+    _packages = widget.packageUpdates ?? PackageUpdates();
     WidgetsBinding.instance.addObserver(this);
     unawaited(_loadInstalledVersion());
   }
@@ -83,6 +88,7 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
       widget.discovery.stop();
       widget.discovery.hide();
       _updates?.cancel();
+      _packages.cancel();
     }
   }
 
@@ -91,6 +97,7 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.discovery.dispose();
     _updates?.dispose();
+    _packages.dispose();
     super.dispose();
   }
 
@@ -111,9 +118,12 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
       updates: _updates,
       readingVersion: _readingVersion,
       onRetryVersion: _loadInstalledVersion,
-      appPlatform: widget.appPlatform,
+      packages: _packages,
     ),
-    _ => _PlannedPage(index: _selected),
+    _ => _PlannedPage(
+      index: _selected,
+      onNearby: () => setState(() => _selected = 0),
+    ),
   };
 
   @override
@@ -135,12 +145,26 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
             MediaQuery.textScalerOf(context).scale(1) <= 1.4;
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Mirquova'),
-            actions: const [
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: Center(child: Text('Preview 04')),
-              ),
+            title: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.hub_outlined),
+                SizedBox(width: 10),
+                Flexible(child: Text('Mirquova')),
+              ],
+            ),
+            actions: [
+              if (medium)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Center(
+                    child: Chip(
+                      avatar: Icon(Icons.science_outlined, size: 16),
+                      label: Text('Preview 04'),
+                      side: BorderSide.none,
+                    ),
+                  ),
+                ),
             ],
           ),
           drawer: medium
@@ -178,6 +202,11 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
               children: [
                 if (medium) ...[
                   NavigationRail(
+                    minExtendedWidth: 216,
+                    leading: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Icon(Icons.sensors, size: 32),
+                    ),
                     extended: wide,
                     selectedIndex: _selected,
                     labelType: wide
@@ -198,6 +227,7 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
                 ],
                 Expanded(
                   child: SingleChildScrollView(
+                    key: ValueKey(_selected),
                     child: Center(
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 1080),
@@ -219,8 +249,9 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
 }
 
 class _PlannedPage extends StatelessWidget {
-  const _PlannedPage({required this.index});
+  const _PlannedPage({required this.index, required this.onNearby});
   final int index;
+  final VoidCallback onNearby;
   @override
   Widget build(BuildContext context) {
     final descriptions = <int, String>{
@@ -250,6 +281,33 @@ class _PlannedPage extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(descriptions[index]!),
+        const SizedBox(height: 28),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.route_outlined),
+                const SizedBox(height: 16),
+                Text(
+                  'Start with discovery',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'You can scan your LAN, make this device temporarily visible, and save manual addresses. Secure pairing is the next milestone before sharing becomes available.',
+                ),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: onNearby,
+                  icon: const Icon(Icons.radar_outlined),
+                  label: const Text('Go to Nearby'),
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }

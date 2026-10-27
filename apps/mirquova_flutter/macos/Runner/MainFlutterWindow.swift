@@ -9,6 +9,13 @@ class MainFlutterWindow: NSWindow {
     return value.range(of: pattern, options: .regularExpression) != nil
   }
 
+  static func updateDirectory() throws -> URL {
+    let root = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
+      appropriateFor: nil, create: true).appendingPathComponent("mirquova-updates", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    return root
+  }
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     let windowFrame = self.frame
@@ -37,6 +44,32 @@ class MainFlutterWindow: NSWindow {
           return
         }
         result(["version": version, "buildNumber": buildNumber])
+      case "getUpdateDirectory":
+        do {
+          let root = try MainFlutterWindow.updateDirectory()
+          result(root.path)
+        } catch {
+          result(FlutterError(code: "storage_unavailable", message: "Update storage is unavailable.", details: nil))
+        }
+      case "openUpdatePackage":
+        do {
+          let root = try MainFlutterWindow.updateDirectory().resolvingSymlinksInPath()
+          guard let path = call.arguments as? String else { throw CocoaError(.fileReadInvalidFileName) }
+          let file = URL(fileURLWithPath: path).standardizedFileURL
+          let resolved = file.resolvingSymlinksInPath()
+          let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+          guard file == resolved,
+                values.isRegularFile == true, values.isSymbolicLink != true,
+                resolved.deletingLastPathComponent().deletingLastPathComponent() == root,
+                resolved.deletingLastPathComponent().lastPathComponent.hasPrefix("download-"),
+                resolved.lastPathComponent == "Mirquova-preview-macos-arm64.zip" else {
+            throw CocoaError(.fileReadInvalidFileName)
+          }
+          if NSWorkspace.shared.open(resolved) { result(nil) }
+          else { result(FlutterError(code: "package_unavailable", message: "The downloaded package could not be opened.", details: nil)) }
+        } catch {
+          result(FlutterError(code: "invalid_package", message: "Only a downloaded Mirquova update can be opened.", details: nil))
+        }
       case "openReleasePage":
         guard let value = call.arguments as? String,
               MainFlutterWindow.isReleasePage(value),

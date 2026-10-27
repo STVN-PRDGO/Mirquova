@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../core/app_platform.dart';
+import '../../adapters/package_updates.dart';
 import '../../core/app_updates.dart';
 import 'system_updates_card.dart';
 
@@ -12,7 +12,7 @@ class SettingsPage extends StatelessWidget {
     required this.updates,
     required this.readingVersion,
     required this.onRetryVersion,
-    required this.appPlatform,
+    required this.packages,
   });
 
   final ThemeMode theme;
@@ -20,7 +20,7 @@ class SettingsPage extends StatelessWidget {
   final UpdateController? updates;
   final bool readingVersion;
   final VoidCallback onRetryVersion;
-  final AppPlatform appPlatform;
+  final PackageUpdates packages;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -56,7 +56,7 @@ class SettingsPage extends StatelessWidget {
         updates: updates,
         readingVersion: readingVersion,
         onRetryVersion: onRetryVersion,
-        appPlatform: appPlatform,
+        packages: packages,
       ),
       const SizedBox(height: 24),
       const Text(

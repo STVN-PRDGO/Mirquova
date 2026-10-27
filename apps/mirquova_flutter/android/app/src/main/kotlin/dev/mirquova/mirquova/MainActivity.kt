@@ -7,6 +7,9 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.provider.Settings
+import androidx.core.content.FileProvider
+import java.io.File
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -62,6 +65,52 @@ class MainActivity : FlutterActivity() {
                             }
                         } catch (_: PackageManager.NameNotFoundException) {
                             result.error("version_unavailable", "The installed application version could not be read.", null)
+                        }
+                    }
+                    "getUpdateDirectory" -> {
+                        val root = File(cacheDir, "mirquova-updates")
+                        if (root.isDirectory || root.mkdirs()) result.success(root.canonicalPath)
+                        else result.error("storage_unavailable", "Update storage is unavailable.", null)
+                    }
+                    "openUpdatePackage" -> {
+                        try {
+                            val path = call.arguments as? String ?: throw IllegalArgumentException()
+                            val original = File(path)
+                            val file = original.canonicalFile
+                            val root = File(cacheDir, "mirquova-updates").canonicalFile
+                            if (original.absolutePath != file.path || !file.isFile ||
+                                file.parentFile?.parentFile != root ||
+                                file.parentFile?.name?.startsWith("download-") != true ||
+                                file.name != "Mirquova-preview-android-arm64-debug.apk") throw IllegalArgumentException()
+                            @Suppress("DEPRECATION")
+                            val archive = packageManager.getPackageArchiveInfo(file.path, PackageManager.GET_SIGNATURES)
+                            @Suppress("DEPRECATION")
+                            val installed = packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
+                            @Suppress("DEPRECATION")
+                            val signaturesMatch = archive?.signatures?.map { it.toCharsString() }?.toSet() ==
+                                installed.signatures?.map { it.toCharsString() }?.toSet()
+                            val archiveCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) archive?.longVersionCode else {
+                                @Suppress("DEPRECATION")
+                                archive?.versionCode?.toLong()
+                            }
+                            val installedCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) installed.longVersionCode else {
+                                @Suppress("DEPRECATION")
+                                installed.versionCode.toLong()
+                            }
+                            if (archive?.packageName != packageName || !signaturesMatch ||
+                                archiveCode == null || archiveCode <= installedCode) {
+                                result.error("incompatible_package", "The APK must be a newer Mirquova build signed with the same key.", null)
+                            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                                result.error("install_permission", "Allow Mirquova to install updates, then open the downloaded update again.", null)
+                            } else {
+                                val uri = FileProvider.getUriForFile(this, "$packageName.updates", file)
+                                startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                                result.success(null)
+                            }
+                        } catch (_: Exception) {
+                            result.error("invalid_package", "The downloaded update could not be opened by the system installer.", null)
                         }
                     }
                     "openReleasePage" -> {

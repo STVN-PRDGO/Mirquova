@@ -51,8 +51,10 @@ Hide now or hiding/closing the app stops visibility. No transport endpoint is of
 Use this updated preview on both devices; the earlier discovery contract is incompatible.
 Manual addresses are session-only candidates and are not contacted or trusted.
 Settings > System updates asks permission before checking GitHub for a stable release.
-A newer release offers release notes and a browser link; downloading and installing are manual.
-There are no automatic update requests, package downloads or package installation.
+A newer release offers release notes and a consented download in Settings, without opening GitHub.
+Downloads require a compatible release asset with a published SHA-256 digest.
+Open downloaded update hands the local package to your system. Installation needs user approval.
+There are no automatic update requests or silent installations.
 
 Source: https://github.com/STVN-PRDGO/Mirquova
 Build/test instructions: https://github.com/STVN-PRDGO/Mirquova/blob/main/docs/build-and-run.md

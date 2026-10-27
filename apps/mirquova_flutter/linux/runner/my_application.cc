@@ -1,6 +1,7 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+#include <filesystem>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
@@ -28,6 +29,46 @@ static void app_method_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
     fl_value_set_string_take(info, "version", fl_value_new_string(MIRQUOVA_VERSION));
     fl_value_set_string_take(info, "buildNumber", fl_value_new_string(MIRQUOVA_BUILD));
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(info));
+  } else if (g_strcmp0(method, "getUpdateDirectory") == 0 ||
+             g_strcmp0(method, "openUpdatePackage") == 0) {
+    try {
+      namespace fs = std::filesystem;
+      const auto root = fs::path(g_get_user_cache_dir()) / "mirquova-updates";
+      fs::create_directories(root);
+      if (g_strcmp0(method, "getUpdateDirectory") == 0) {
+        response = FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_string(root.c_str())));
+      } else {
+        FlValue* args = fl_method_call_get_args(call);
+        const gchar* path = args && fl_value_get_type(args) == FL_VALUE_TYPE_STRING
+            ? fl_value_get_string(args) : nullptr;
+        bool valid = false;
+        fs::path file;
+        if (path) {
+          file = fs::canonical(path);
+          const auto name = file.filename().string();
+          valid = !fs::is_symlink(path) && fs::is_regular_file(file) &&
+              file.parent_path().parent_path() == fs::canonical(root) &&
+              file.parent_path().filename().string().rfind("download-", 0) == 0 &&
+              (name == "Mirquova-preview-linux-x64.tar.gz" || name == "Mirquova-preview-linux-arm64.tar.gz");
+        }
+        if (!valid) {
+          response = FL_METHOD_RESPONSE(fl_method_error_response_new(
+              "invalid_package", "Only a downloaded Mirquova update can be opened.", nullptr));
+        } else {
+          g_autofree gchar* uri = g_filename_to_uri(file.c_str(), nullptr, nullptr);
+          g_autoptr(GError) error = nullptr;
+          if (uri && g_app_info_launch_default_for_uri(uri, nullptr, &error)) {
+            response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+          } else {
+            response = FL_METHOD_RESPONSE(fl_method_error_response_new(
+                "package_unavailable", "The downloaded package could not be opened.", nullptr));
+          }
+        }
+      }
+    } catch (const std::filesystem::filesystem_error&) {
+      response = FL_METHOD_RESPONSE(fl_method_error_response_new(
+          "storage_unavailable", "Update storage is unavailable.", nullptr));
+    }
   } else if (g_strcmp0(method, "openReleasePage") == 0) {
     FlValue* args = fl_method_call_get_args(call);
     const gchar* url = args && fl_value_get_type(args) == FL_VALUE_TYPE_STRING

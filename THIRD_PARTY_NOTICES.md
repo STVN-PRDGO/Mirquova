@@ -13,6 +13,7 @@ Project code licensing and release identifiers remain undecided. Project-local t
 | dart | characters | 1.4.1 | See original license | [Present](third_party/licenses/dart/characters-1.4.1/) |
 | dart | clock | 1.1.3 | See original license | [Present](third_party/licenses/dart/clock-1.1.3/) |
 | dart | collection | 1.19.1 | See original license | [Present](third_party/licenses/dart/collection-1.19.1/) |
+| dart | crypto | 3.0.7 | See original license | [Present](third_party/licenses/dart/crypto-3.0.7/) |
 | dart | fake_async | 1.3.3 | See original license | [Present](third_party/licenses/dart/fake_async-1.3.3/) |
 | dart | ffi | 2.2.0 | See original license | [Present](third_party/licenses/dart/ffi-2.2.0/) |
 | dart | file | 7.0.1 | See original license | [Present](third_party/licenses/dart/file-7.0.1/) |
@@ -40,6 +41,7 @@ Project code licensing and release identifiers remain undecided. Project-local t
 | dart | sync_http | 0.3.1 | See original license | [Present](third_party/licenses/dart/sync_http-0.3.1/) |
 | dart | term_glyph | 1.2.2 | See original license | [Present](third_party/licenses/dart/term_glyph-1.2.2/) |
 | dart | test_api | 0.7.12 | See original license | [Present](third_party/licenses/dart/test_api-0.7.12/) |
+| dart | typed_data | 1.4.0 | See original license | [Present](third_party/licenses/dart/typed_data-1.4.0/) |
 | dart | vector_math | 2.4.0 | See original license | [Present](third_party/licenses/dart/vector_math-2.4.0/) |
 | dart | vm_service | 15.4.0 | See original license | [Present](third_party/licenses/dart/vm_service-15.4.0/) |
 | dart | web | 1.1.2 | See original license | [Present](third_party/licenses/dart/web-1.1.2/) |

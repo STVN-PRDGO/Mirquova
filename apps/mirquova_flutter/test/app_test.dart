@@ -142,6 +142,90 @@ void main() {
     expect(find.text('Core unavailable'), findsOneWidget);
   });
 
+  testWidgets(
+    'missing native core disables network actions but allows saved addresses',
+    (tester) async {
+      final port = TestDiscovery()
+        ..value = const DiscoverySnapshot(status: DiscoveryStatus.unavailable);
+      await launch(tester, port, const Size(1280, 800));
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Scan nearby'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Make discoverable'),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.text('Add LAN address'));
+      await tester.pumpAndSettle();
+      expect(find.text('Add a LAN address'), findsOneWidget);
+      expect(port.starts, 0);
+    },
+  );
+
+  testWidgets('duplicate manual addresses give feedback and stay unique', (
+    tester,
+  ) async {
+    await launch(tester, TestDiscovery(), const Size(1280, 800));
+    for (var attempt = 0; attempt < 2; attempt++) {
+      await tester.tap(find.text('Add LAN address'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).first, '192.168.1.20');
+      await tester.tap(find.text('Add address'));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('192.168.1.20:45833'), findsOneWidget);
+    expect(find.text('1 saved addresses'), findsOneWidget);
+    expect(find.text('This address is already saved.'), findsOneWidget);
+  });
+
+  testWidgets(
+    'planned feature returns to working discovery without network activity',
+    (tester) async {
+      final port = TestDiscovery();
+      await launch(tester, port, const Size(1280, 800));
+      await tester.tap(find.text('Cast').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Go to Nearby'));
+      await tester.pumpAndSettle();
+      expect(find.text('Your devices, closer.'), findsOneWidget);
+      expect(port.starts, 0);
+    },
+  );
+
+  testWidgets(
+    'visibility countdown reflects the discovery snapshot and expiry',
+    (tester) async {
+      final port = TestDiscovery();
+      await launch(tester, port, const Size(1280, 800));
+      await port.makeDiscoverable('Office');
+      await tester.pump();
+      expect(find.text('Hides automatically in 2:00'), findsOneWidget);
+      port.value = port.value.copyWith(
+        presence: const PresenceState(
+          status: PresenceStatus.visible,
+          alias: 'Office',
+          remainingSeconds: 9,
+        ),
+      );
+      port.notifyListeners();
+      await tester.pump();
+      expect(find.text('Hides automatically in 0:09'), findsOneWidget);
+      port.hide();
+      await tester.pump();
+      expect(find.text('Hidden from discovery'), findsOneWidget);
+      expect(find.text('Hides automatically in 0:09'), findsNothing);
+    },
+  );
+
   testWidgets('settings switches light and dark appearance', (tester) async {
     await launch(tester, TestDiscovery(), const Size(1280, 800));
     await tester.tap(find.text('Settings'));

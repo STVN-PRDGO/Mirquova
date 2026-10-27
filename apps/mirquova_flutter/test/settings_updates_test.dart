@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mirquova/app.dart';
+import 'package:mirquova/adapters/package_updates.dart';
 import 'package:mirquova/core/app_platform.dart';
 import 'package:mirquova/core/app_updates.dart';
 
@@ -30,6 +32,35 @@ class _AppPlatform implements AppPlatform {
   }
 }
 
+class _PackagePlatform implements PackagePlatform {
+  @override
+  String get packageName => 'Mirquova-preview-macos-arm64.zip';
+  @override
+  Future<Directory> updateDirectory() async =>
+      throw StateError('offline widget test');
+  @override
+  Future<void> openPackage(File file) async =>
+      throw StateError('offline widget test');
+}
+
+class _Packages extends PackageUpdates {
+  _Packages() : super(platform: _PackagePlatform());
+  int downloads = 0, opens = 0;
+  @override
+  Future<void> download(UpdateAsset selected) async {
+    downloads++;
+    asset = selected;
+    status = PackageStatus.ready;
+    message = 'Download verified. Ready to open.';
+    notifyListeners();
+  }
+
+  @override
+  Future<void> open() async {
+    opens++;
+  }
+}
+
 class _Releases implements UpdateSource {
   int calls = 0;
   int cancellations = 0;
@@ -53,6 +84,16 @@ UpdateRelease _release([String version = '0.3.0+3']) => UpdateRelease(
     'https://github.com/STVN-PRDGO/Mirquova/releases/tag/v$version',
   ),
   notes: 'Fixture release notes for offline UI tests.',
+  assets: [
+    UpdateAsset(
+      name: 'Mirquova-preview-macos-arm64.zip',
+      url: Uri.parse(
+        'https://github.com/STVN-PRDGO/Mirquova/releases/download/v$version/Mirquova-preview-macos-arm64.zip',
+      ),
+      size: 1024,
+      sha256: '0' * 64,
+    ),
+  ],
 );
 
 void main() {
@@ -61,6 +102,7 @@ void main() {
     _Releases releases,
     _AppPlatform platform, {
     Size size = const Size(1280, 900),
+    _Packages? packages,
   }) async {
     await tester.binding.setSurfaceSize(size);
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -69,6 +111,7 @@ void main() {
         discovery: TestDiscovery(),
         appPlatform: platform,
         updateSource: releases,
+        packageUpdates: packages ?? _Packages(),
       ),
     );
     await tester.pumpAndSettle();
@@ -122,11 +165,12 @@ void main() {
   );
 
   testWidgets(
-    'consented update shows release notes and explicit browser action',
+    'release downloads in app after consent and opens the local package explicitly',
     (tester) async {
       final releases = _Releases();
       final platform = _AppPlatform();
-      await launch(tester, releases, platform);
+      final packages = _Packages();
+      await launch(tester, releases, platform, packages: packages);
       await startCheck(tester);
       expect(releases.calls, 1);
       expect(find.text('Checking for updates...'), findsOneWidget);
@@ -150,10 +194,19 @@ void main() {
         find.text('Fixture release notes for offline UI tests.'),
         findsOneWidget,
       );
-      await tester.ensureVisible(find.text('Open release page'));
-      await tester.tap(find.text('Open release page'));
+      await tester.ensureVisible(find.text('Download update'));
+      await tester.tap(find.text('Download update'));
       await tester.pumpAndSettle();
-      expect(platform.opened, [_release().pageUrl]);
+      expect(packages.downloads, 0);
+      await tester.tap(find.text('Download now'));
+      await tester.pumpAndSettle();
+      expect(packages.downloads, 1);
+      expect(packages.opens, 0);
+      await tester.ensureVisible(find.text('Open downloaded update'));
+      await tester.tap(find.text('Open downloaded update'));
+      await tester.pumpAndSettle();
+      expect(packages.opens, 1);
+      expect(platform.opened, isEmpty);
     },
   );
 
@@ -243,21 +296,26 @@ void main() {
     },
   );
 
-  testWidgets('browser failure keeps an address for manual handoff', (
-    tester,
-  ) async {
-    final releases = _Releases();
-    final platform = _AppPlatform()..failOpening = true;
-    await launch(tester, releases, platform);
-    await startCheck(tester);
-    releases.requests.single.complete(_release());
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Open release page'));
-    await tester.tap(find.text('Open release page'));
-    await tester.pumpAndSettle();
-    expect(find.text(_release().pageUrl.toString()), findsOneWidget);
-    expect(find.textContaining('could not be opened'), findsOneWidget);
-  });
+  testWidgets(
+    'cancelling package consent makes no download or browser request',
+    (tester) async {
+      final releases = _Releases();
+      final platform = _AppPlatform();
+      final packages = _Packages();
+      await launch(tester, releases, platform, packages: packages);
+      await startCheck(tester);
+      releases.requests.single.complete(_release());
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Download update'));
+      await tester.tap(find.text('Download update'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(packages.downloads, 0);
+      expect(platform.opened, isEmpty);
+      expect(find.text('Open release page'), findsNothing);
+    },
+  );
 
   testWidgets('conflicting installed metadata keeps update checks disabled', (
     tester,
@@ -304,7 +362,7 @@ void main() {
         expect(tester.takeException(), isNull);
         releases.requests.single.complete(_release());
         await tester.pumpAndSettle();
-        await tester.ensureVisible(find.text('Open release page'));
+        await tester.ensureVisible(find.text('Download update'));
         expect(tester.takeException(), isNull);
         expect(find.text('New release available'), findsOneWidget);
       });

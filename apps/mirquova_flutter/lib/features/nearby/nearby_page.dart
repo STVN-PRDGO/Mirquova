@@ -21,26 +21,85 @@ class NearbyPage extends StatelessWidget {
     builder: (context, _) {
       final snapshot = discovery.snapshot;
       final scanning = snapshot.status == DiscoveryStatus.scanning;
+      final available = snapshot.status != DiscoveryStatus.unavailable;
       final colors = Theme.of(context).colorScheme;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Your devices, closer.',
-            style: Theme.of(context).textTheme.headlineLarge
-                ?.copyWith(fontWeight: FontWeight.w600),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: colors.primaryContainer,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.wifi_tethering,
+                      color: colors.onPrimaryContainer,
+                    ),
+                    Text(
+                      'YOUR LOCAL NETWORK',
+                      style: TextStyle(
+                        color: colors.onPrimaryContainer,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Your devices, closer.',
+                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -1,
+                    color: colors.onPrimaryContainer,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Find Mirquova devices on your local network. You decide what connects and what gets shared.',
+                  style: TextStyle(
+                    color: colors.onPrimaryContainer,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Wrap(
+                  spacing: 20,
+                  runSpacing: 8,
+                  children: [
+                    _NetworkFact(
+                      icon: Icons.devices_outlined,
+                      label: '${snapshot.peers.length} discovered',
+                    ),
+                    _NetworkFact(
+                      icon: Icons.link_outlined,
+                      label: '${manualEndpoints.length} saved addresses',
+                    ),
+                    const _NetworkFact(
+                      icon: Icons.shield_outlined,
+                      label: 'Permission first',
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 12),
-          const Text(
-            'Find Mirquova devices on your local network. You decide what connects and what gets shared.',
-          ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
           Wrap(
             spacing: 12,
             runSpacing: 12,
             children: [
               FilledButton.icon(
-                onPressed: scanning ? null : discovery.start,
+                onPressed: scanning || !available ? null : discovery.start,
                 icon: const Icon(Icons.radar_outlined),
                 label: const Text('Scan nearby'),
               ),
@@ -56,8 +115,22 @@ class NearbyPage extends StatelessWidget {
                     context: context,
                     builder: (_) => const _AddressDialog(),
                   );
-                  if (endpoint != null) {
-                    onAdd(endpoint);
+                  if (endpoint != null && context.mounted) {
+                    final duplicate = manualEndpoints.any(
+                      (item) => item.key == endpoint.key,
+                    );
+                    if (!duplicate) onAdd(endpoint);
+                    ScaffoldMessenger.of(context)
+                      ..hideCurrentSnackBar()
+                      ..showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            duplicate
+                                ? 'This address is already saved.'
+                                : 'Address saved for this session.',
+                          ),
+                        ),
+                      );
                   }
                 },
                 icon: const Icon(Icons.add_link_outlined),
@@ -72,6 +145,13 @@ class NearbyPage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Icon(
+                    snapshot.presence.active
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                    color: colors.primary,
+                  ),
+                  const SizedBox(height: 12),
                   Semantics(
                     liveRegion: true,
                     child: Text(switch (snapshot.presence.status) {
@@ -87,6 +167,16 @@ class NearbyPage extends StatelessWidget {
                   const Text(
                     'Share a chosen name with devices on this LAN for up to two minutes. This does not allow connections or file access.',
                   ),
+                  if (snapshot.presence.status == PresenceStatus.visible) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Hides automatically in ${snapshot.presence.remainingSeconds ~/ 60}:${(snapshot.presence.remainingSeconds % 60).toString().padLeft(2, '0')}',
+                      style: TextStyle(
+                        color: colors.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                   if (snapshot.presence.message != null) ...[
                     const SizedBox(height: 8),
                     Text(snapshot.presence.message!),
@@ -103,15 +193,17 @@ class NearbyPage extends StatelessWidget {
                     )
                   else
                     OutlinedButton.icon(
-                      onPressed: () async {
-                        final alias = await showDialog<String>(
-                          context: context,
-                          builder: (_) => const _VisibilityDialog(),
-                        );
-                        if (alias != null) {
-                          await discovery.makeDiscoverable(alias);
-                        }
-                      },
+                      onPressed: !available
+                          ? null
+                          : () async {
+                              final alias = await showDialog<String>(
+                                context: context,
+                                builder: (_) => const _VisibilityDialog(),
+                              );
+                              if (alias != null && context.mounted) {
+                                await discovery.makeDiscoverable(alias);
+                              }
+                            },
                       icon: const Icon(Icons.visibility_outlined),
                       label: const Text('Make discoverable'),
                     ),
@@ -137,7 +229,10 @@ class NearbyPage extends StatelessWidget {
             const SizedBox(height: 16),
           ],
           if (scanning) ...[
-            const LinearProgressIndicator(),
+            LinearProgressIndicator(
+              value: MediaQuery.disableAnimationsOf(context) ? 0.5 : null,
+              semanticsLabel: 'Scanning the local network',
+            ),
             const SizedBox(height: 24),
           ],
           if (snapshot.peers.isEmpty)
@@ -151,7 +246,18 @@ class NearbyPage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.devices_outlined, size: 40),
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: colors.secondaryContainer,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.radar_outlined,
+                      size: 40,
+                      color: colors.onSecondaryContainer,
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     scanning
@@ -167,23 +273,26 @@ class NearbyPage extends StatelessWidget {
               ),
             ),
           for (final peer in snapshot.peers)
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      peer.name,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(peer.addresses.join(', ')),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Unverified - seen in the last scan. Pairing is not available yet.',
-                    ),
-                  ],
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        peer.name,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(peer.addresses.join(', ')),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Unverified - seen in the last scan. Pairing is not available yet.',
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -196,15 +305,24 @@ class NearbyPage extends StatelessWidget {
           const Text(
             'Private IPv4 addresses only in this preview. Adding an address saves it for this session; it does not contact, pair, or trust the device.',
           ),
+          if (manualEndpoints.isEmpty) ...[
+            const SizedBox(height: 16),
+            const Text(
+              'No saved addresses. Use Add LAN address to keep one here.',
+            ),
+          ],
           for (final endpoint in manualEndpoints)
-            Card(
-              child: ListTile(
-                title: Text(endpoint.key),
-                subtitle: const Text('Unverified - not contacted'),
-                trailing: IconButton(
-                  tooltip: 'Remove ${endpoint.key}',
-                  onPressed: () => onRemove(endpoint),
-                  icon: const Icon(Icons.close),
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Card(
+                child: ListTile(
+                  title: Text(endpoint.key),
+                  subtitle: const Text('Unverified - not contacted'),
+                  trailing: IconButton(
+                    tooltip: 'Remove ${endpoint.key}',
+                    onPressed: () => onRemove(endpoint),
+                    icon: const Icon(Icons.close),
+                  ),
                 ),
               ),
             ),
@@ -215,11 +333,38 @@ class NearbyPage extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Discovery names are claims, not verified identities. File transfer, pairing, screen casting and playback are not available in this first preview.',
+            'Discovery names are claims, not verified identities. File transfer, pairing, screen casting and playback are not available in this preview.',
           ),
         ],
       );
     },
+  );
+}
+
+class _NetworkFact extends StatelessWidget {
+  const _NetworkFact({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(
+        icon,
+        size: 18,
+        color: Theme.of(context).colorScheme.onPrimaryContainer,
+      ),
+      const SizedBox(width: 8),
+      Flexible(
+        child: Text(
+          label,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onPrimaryContainer,
+          ),
+        ),
+      ),
+    ],
   );
 }
 
