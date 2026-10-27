@@ -140,6 +140,7 @@ void main() {
     await tester.pumpWidget(page());
     final invitationField = find.widgetWithText(TextField, 'Invitation text');
     await tester.enterText(invitationField, _invitation);
+    await tester.ensureVisible(find.text('Read invitation'));
     await tester.tap(find.text('Read invitation'));
     await tester.pump();
     await tester.ensureVisible(find.byType(CheckboxListTile));
@@ -171,6 +172,7 @@ void main() {
       find.widgetWithText(TextField, 'Invitation text'),
       _invitation,
     );
+    await tester.ensureVisible(find.text('Read invitation'));
     await tester.tap(find.text('Read invitation'));
     await tester.pump();
 
@@ -204,6 +206,7 @@ void main() {
     await tester.pumpWidget(page());
     final invitationField = find.widgetWithText(TextField, 'Invitation text');
     await tester.enterText(invitationField, _invitation);
+    await tester.ensureVisible(find.text('Read invitation'));
     await tester.tap(find.text('Read invitation'));
     await tester.pump();
     await tester.ensureVisible(find.byType(CheckboxListTile));
@@ -219,6 +222,7 @@ void main() {
     );
 
     await tester.enterText(invitationField, _invitation);
+    await tester.ensureVisible(find.text('Read invitation'));
     await tester.tap(find.text('Read invitation'));
     await tester.pump();
     expect(
@@ -240,6 +244,7 @@ void main() {
       invitationField,
       _invitation.replaceFirst('"ttl_seconds":120', '"ttl_seconds":1'),
     );
+    await tester.ensureVisible(find.text('Read invitation'));
     await tester.tap(find.text('Read invitation'));
     await tester.pump();
 
