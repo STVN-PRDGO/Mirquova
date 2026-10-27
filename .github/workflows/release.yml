@@ -94,9 +94,109 @@ jobs:
           name: android-release
           path: Mirquova-preview-android-arm64-debug.apk
 
+  macos:
+    name: Build macOS Release Package
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+          targets: aarch64-apple-darwin
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.8'
+          channel: stable
+          cache: true
+      - name: Build and verify macOS app bundle
+        run: bash scripts/Build-macOS.sh
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: |
+            artifacts/iteration-04/Mirquova-preview-macos-arm64.zip
+            artifacts/iteration-04/Mirquova-preview-macos-arm64.sha256
+          if-no-files-found: error
+
+  linux:
+    name: Build Linux Release Package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.8'
+          channel: stable
+          cache: true
+      - name: Install Linux build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev xvfb
+      - name: Build Flutter and Rust Linux release bundle
+        run: bash scripts/Build-Linux.sh
+      - name: Verify bundled native core and app metadata
+        working-directory: apps/mirquova_flutter
+        run: xvfb-run -a flutter test integration_test/native_app_platform_test.dart -d linux --no-pub
+      - name: Package Linux tarball
+        run: |
+          test -f apps/mirquova_flutter/build/linux/x64/release/bundle/lib/libmirquova_core.so
+          tar -czf Mirquova-preview-linux-x64.tar.gz -C apps/mirquova_flutter/build/linux/x64/release/bundle .
+          sha256sum Mirquova-preview-linux-x64.tar.gz > Mirquova-preview-linux-x64.sha256
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            Mirquova-preview-linux-x64.tar.gz
+            Mirquova-preview-linux-x64.sha256
+          if-no-files-found: error
+
+  ios:
+    name: Build iOS Unsigned Device App
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+          targets: aarch64-apple-ios
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.8'
+          channel: stable
+          cache: true
+      - name: Build unsigned iOS app and verify Rust ABI exports
+        run: bash scripts/Build-iOS.sh device
+      - name: Package iOS device app with notices
+        run: |
+          mkdir -p artifacts/Mirquova-ios-arm64-unsigned
+          ditto apps/mirquova_flutter/build/ios/iphoneos/Runner.app artifacts/Mirquova-ios-arm64-unsigned/Runner.app
+          cp THIRD_PARTY_NOTICES.md artifacts/Mirquova-ios-arm64-unsigned/
+          ditto third_party artifacts/Mirquova-ios-arm64-unsigned/third_party
+          cat > artifacts/Mirquova-ios-arm64-unsigned/README.txt <<'TXT'
+          Unsigned Mirquova iOS ARM64 device app for development.
+          This ZIP is not an installable IPA or a simulator build.
+          Device installation requires Apple signing and a provisioning profile.
+          LAN discovery additionally requires Apple's approved multicast entitlement
+          and local-network permission. No physical iPhone testing is claimed.
+          See docs/build-and-run.md in the source repository for signed IPA builds.
+          TXT
+          ditto -c -k --keepParent artifacts/Mirquova-ios-arm64-unsigned Mirquova-preview-ios-arm64-unsigned.zip
+          shasum -a 256 Mirquova-preview-ios-arm64-unsigned.zip > Mirquova-preview-ios-arm64-unsigned.sha256
+      - name: Upload iOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-release
+          path: |
+            Mirquova-preview-ios-arm64-unsigned.zip
+            Mirquova-preview-ios-arm64-unsigned.sha256
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub Release
-    needs: [windows, android]
+    needs: [windows, android, macos, linux, ios]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -108,29 +208,59 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: android-release
+      - name: Download macOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-release
+      - name: Download Linux package
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release
+      - name: Download iOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-release
       - name: Determine tag name
         id: release_tag
+        env:
+          REQUESTED_TAG: ${{ github.event.inputs.tag_name }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
-            echo "tag=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
-          else
-            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          tag="${REQUESTED_TAG:-$REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?$ ]]; then
+            echo 'Expected a stable release tag such as v0.3.0 or v0.3.0+3.' >&2
+            exit 1
           fi
-      - name: Create or Update GitHub Release
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.release_tag.outputs.tag }}
         run: |
+          cat > release-notes.md <<'TXT'
+          ### Mirquova development preview
+
+          #### Downloads
+          - **Windows (x64)**: Extract `Mirquova-preview-windows-x64.zip` completely and run `mirquova.exe`. Keep all bundled files together.
+          - **Android (ARM64)**: Install `Mirquova-preview-android-arm64-debug.apk`. This is a debug-signed phone preview.
+          - **macOS (Apple Silicon)**: Extract `Mirquova-preview-macos-arm64.zip` and move `mirquova.app` to Applications. The app is signed ad hoc and is not notarized; macOS may require explicit approval in Privacy & Security. Intel Macs are not supported by this package.
+          - **Linux (x64)**: Extract `Mirquova-preview-linux-x64.tar.gz`, keep the entire bundle together, and run `./mirquova`. Built on Ubuntu 24.04; requires GTK3 and compatible system libraries.
+          - **iOS (ARM64)**: `Mirquova-preview-ios-arm64-unsigned.zip` contains an unsigned device app for development. It is not an installable IPA. Apple signing/provisioning and multicast entitlement approval are required for device discovery builds; see the source build instructions.
+
+          #### Notes
+          - Preview functionality includes consented LAN presence and discovery of unverified candidates. Pairing, transfers, casting and playback remain unavailable.
+          - Native builds do not establish physical-device installation, permission behavior or two-device discovery. Production signing and distribution QA remain pending.
+          - macOS, Linux and iOS packages include third-party notices and adjacent SHA-256 checksum files.
+          TXT
           gh release create "$TAG" \
             Mirquova-preview-windows-x64.zip \
             Mirquova-preview-android-arm64-debug.apk \
+            Mirquova-preview-macos-arm64.zip \
+            Mirquova-preview-macos-arm64.sha256 \
+            Mirquova-preview-linux-x64.tar.gz \
+            Mirquova-preview-linux-x64.sha256 \
+            Mirquova-preview-ios-arm64-unsigned.zip \
+            Mirquova-preview-ios-arm64-unsigned.sha256 \
+            --target "$GITHUB_SHA" \
             --title "Mirquova Preview $TAG" \
-            --notes "### Mirquova Preview $TAG
-
-          #### Downloads
-          - **Windows (x64)**: Download \`Mirquova-preview-windows-x64.zip\`, extract completely into a folder, and run \`mirquova.exe\`. Keep all DLLs in the extracted folder.
-          - **Android (ARM64)**: Download \`Mirquova-preview-android-arm64-debug.apk\` and install on Android 7.0+ (ARM64).
-
-          #### Notes
-          - This preview includes local Wi-Fi discovery (mDNS scanning and visibility).
-          - Unsigned development preview for testing purposes."
+            --notes-file release-notes.md

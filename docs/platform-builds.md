@@ -9,6 +9,7 @@ Recorded on 2026-10-27 for source version 0.3.0+3. Historical Windows/Android re
 - New iOS runner includes the app-version/browser bridge, local-network privacy text, Bonjour service declaration and multicast entitlement. Rust builds as a static library; Xcode force loads and retains the seven ABI exports for Dart process lookup. Device and simulator libraries are separate; both are ARM64.
 - Unix build scripts produce a Linux bundle, Android debug APK, unsigned iOS device app or simulator app. Signed IPA export requires caller-supplied signing configuration. Windows PowerShell scripts remain available.
 - CI adds Linux/macOS checks and native packaging, unsigned iOS device/simulator builds and artifact uploads. Remote jobs have not been run from this session.
+- The separate `Release` workflow (`.github/workflows/release.yml`) now builds Windows, Android, macOS ARM64, Linux x64 and an unsigned iOS ARM64 device app. Publishing waits for all five jobs and attaches their packages, plus checksums for the three new platforms. macOS/Linux/iOS packages include third-party notices. iOS remains an unsigned app ZIP, not an installable IPA; signed export requires Apple credentials and provisioning. Existing queued/running workflows retain their original job graph; the expanded workflow applies to a new run after the change is pushed.
 
 ## Local evidence
 
