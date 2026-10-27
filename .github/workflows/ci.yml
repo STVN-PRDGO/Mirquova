@@ -22,7 +22,8 @@ jobs:
         working-directory: apps/mirquova_flutter
       - run: flutter analyze
         working-directory: apps/mirquova_flutter
-      - run: flutter test --dart-define=MIRQUOVA_CORE_LIBRARY=${{ github.workspace }}/target/debug/mirquova_core.dll
+      # Exact golden renders use the macOS reference job below.
+      - run: flutter test --exclude-tags golden --dart-define=MIRQUOVA_CORE_LIBRARY=${{ github.workspace }}/target/debug/mirquova_core.dll
         working-directory: apps/mirquova_flutter
       - run: flutter build windows --debug
         working-directory: apps/mirquova_flutter
@@ -94,7 +95,16 @@ jobs:
         run: |
           extension=so
           if [[ "$RUNNER_OS" == macOS ]]; then extension=dylib; fi
-          flutter test --no-pub --dart-define=MIRQUOVA_CORE_LIBRARY="$GITHUB_WORKSPACE/target/debug/libmirquova_core.$extension" test/app_test.dart test/discovery_test.dart test/native_controller_test.dart test/native_bridge_test.dart test/app_updates_test.dart test/github_updates_test.dart test/native_app_platform_test.dart test/settings_updates_test.dart
+          visual_args=()
+          if [[ "$RUNNER_OS" != macOS ]]; then visual_args=(--exclude-tags golden); fi
+          flutter test --no-pub "${visual_args[@]}" --dart-define=MIRQUOVA_CORE_LIBRARY="$GITHUB_WORKSPACE/target/debug/libmirquova_core.$extension"
+      - name: Upload visual comparison failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-comparison-${{ runner.os }}
+          path: apps/mirquova_flutter/test/failures/
+          if-no-files-found: ignore
       - if: runner.os == 'Linux'
         run: bash scripts/Build-Linux.sh
       - if: runner.os == 'Linux'

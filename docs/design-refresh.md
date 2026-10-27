@@ -13,3 +13,11 @@ The Flutter preview now uses forest green, charcoal and restrained gold in light
 - Interaction checks include scan/stop, consent/cancellation, background cleanup, address validation/removal/deduplication, missing-core controls, countdown rendering, theme switching, planned-page navigation, and offline update checks. Existing tests cover phone, landscape, tablet and desktop layouts with large text; reduced-motion rendering also passed.
 
 No dependencies or lockfiles changed. This work did not run a native app build or physical-device tests, multicast network tests, live release requests, or browser launches. Golden/widget checks do not establish native installation or TV support. Pairing, file transfer, casting and playback remain unavailable as described in the implementation roadmap; discovery records and saved addresses remain unverified.
+
+## CI reference-host correction
+
+The first Windows CI run after the refresh passed 92 tests but failed the four image comparisons, with 0.86–2.26% pixel differences against these macOS-generated references. Those failures are recorded in [the Windows job](https://github.com/STVN-PRDGO/Mirquova/actions/runs/40470189185/job/122075182948). The references were generated on a different raster host from the old Windows reference workflow.
+
+The four image comparisons now carry the registered `golden` tag. macOS is the canonical reference host and runs the complete suite, including strict image comparisons. Windows/Linux exclude only that tag; the large-text/reduced-motion layout test remains untagged. Unix CI and the macOS build script now discover the complete test suite instead of enumerating test files, so the package-updater tests are included too. CI uploads failed visual comparisons for inspection. No comparator tolerance or baseline pixels were changed for this correction.
+
+Local verification: Flutter analysis passed, the complete suite with the compiled Rust bridge passed 96 tests, the filtered functional suite passed 92 tests, workflow YAML parsed, and the macOS shell build script passed syntax validation. The updated GitHub Actions configuration has not been pushed or run remotely as part of this correction; Windows/Linux native reruns are not claimed.

@@ -68,13 +68,10 @@ cd "$project_root/apps/mirquova_flutter"
 flutter --suppress-analytics --no-version-check pub get --enforce-lockfile
 dart format --output=none --set-exit-if-changed lib test integration_test
 flutter --suppress-analytics --no-version-check analyze --no-pub
-# Golden images are separately reviewed on the Windows reference host.
+# macOS is the reference raster host for the exact golden-image comparisons.
+# Run the complete suite so new tests are included automatically.
 flutter --suppress-analytics --no-version-check test --no-pub \
-  "--dart-define=MIRQUOVA_CORE_LIBRARY=$MIRQUOVA_CORE_BUNDLE" \
-  test/app_test.dart test/discovery_test.dart test/native_controller_test.dart \
-  test/native_bridge_test.dart test/app_updates_test.dart \
-  test/github_updates_test.dart test/native_app_platform_test.dart \
-  test/settings_updates_test.dart
+  "--dart-define=MIRQUOVA_CORE_LIBRARY=$MIRQUOVA_CORE_BUNDLE"
 flutter --suppress-analytics --no-version-check build macos --release --no-pub
 app_path="$PWD/build/macos/Build/Products/Release/mirquova.app"
 if [[ ! -f "$app_path/Contents/Frameworks/libmirquova_core.dylib" ]]; then

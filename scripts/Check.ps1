@@ -18,7 +18,7 @@ try {
         Invoke-Checked { flutter pub get --enforce-lockfile }
         Invoke-Checked { dart format --output=none --set-exit-if-changed lib test integration_test }
         Invoke-Checked { flutter analyze }
-        if ($SkipNativeBridge) { Invoke-Checked { flutter test --reporter expanded } }
-        else { Invoke-Checked { flutter test --reporter expanded "--dart-define=MIRQUOVA_CORE_LIBRARY=$nativeLibrary" } }
+        if ($SkipNativeBridge) { Invoke-Checked { flutter test --exclude-tags golden --reporter expanded } }
+        else { Invoke-Checked { flutter test --exclude-tags golden --reporter expanded "--dart-define=MIRQUOVA_CORE_LIBRARY=$nativeLibrary" } }
     } finally { Pop-Location }
 } finally { Pop-Location }

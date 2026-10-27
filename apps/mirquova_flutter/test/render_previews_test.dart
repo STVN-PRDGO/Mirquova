@@ -61,7 +61,7 @@ void main() {
             'goldens/nearby_${brightness.name}_${size.width.toInt()}.png',
           ),
         );
-      });
+      }, tags: ['golden']);
     }
   }
   testWidgets('large text and reduced motion do not overflow a small phone', (

@@ -31,7 +31,7 @@ Recorded on 2026-10-27 for source version 0.3.0+3. Historical Windows/Android re
 | Linux native app build | Not run: current host is macOS; no running Linux container engine |
 | Android APK | Built successfully; ARM64 payload, APK v2 signature and 16 KiB ZIP alignment verified |
 
-Windows golden-image references were excluded from the selected tests and were not regenerated. Dependencies and preserved source originals/notices were not changed. No live release API, discovery scan, advertisement, physical-device installation or authenticated connection was exercised. iOS multicast entitlement approval, signing, installation, permissions and physical discovery are pending. macOS packages remain Apple Silicon only and require notarization/installation QA before production distribution.
+At the time of this platform-build verification, Windows golden-image references were excluded from the selected tests and were not regenerated. The subsequent design refresh regenerated these references on macOS; exact golden comparisons now run on the macOS CI job, while Windows/Linux exclude only tests tagged `golden`. Dependencies and preserved source originals/notices were not changed. No live release API, discovery scan, advertisement, physical-device installation or authenticated connection was exercised. iOS multicast entitlement approval, signing, installation, permissions and physical discovery are pending. macOS packages remain Apple Silicon only and require notarization/installation QA before production distribution.
 
 ## Generated Android APK
 

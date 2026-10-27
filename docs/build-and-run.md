@@ -63,7 +63,7 @@ Use installed SDKs on other machines instead; Flutter and Dart must match the ve
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Check.ps1
 ```
 
-This runs Rust formatting, clippy, unit tests, the DLL build, Flutter dependency-lock verification, formatting, analysis and widget/native bridge tests. Golden references contain SDK-font renders; review cross-host raster changes rather than blindly regenerating baselines.
+This runs Rust formatting, clippy, unit tests, the DLL build, Flutter dependency-lock verification, formatting, analysis and widget/native bridge tests. Golden references contain SDK-font renders generated on macOS. Exact pixel comparisons run on the macOS CI job; Windows/Linux run the complete functional and layout suite with `--exclude-tags golden`. Only the four image comparisons are tagged; large-text/reduced-motion layout checks remain active on every host. Run `flutter test --no-pub test/render_previews_test.dart` on macOS for visual comparisons. Do not regenerate references on Windows/Linux or loosen the comparator to hide cross-host raster differences. Failed visual comparisons are uploaded from CI as `visual-comparison-macOS`.
 
 ## Windows application
 

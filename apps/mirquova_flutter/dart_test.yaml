@@ -1,0 +1,4 @@
+# Exact image comparisons use the macOS reference raster host in CI.
+# Layout and accessibility tests remain untagged and run on every desktop host.
+tags:
+  golden:
