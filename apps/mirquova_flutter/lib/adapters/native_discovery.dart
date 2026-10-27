@@ -32,8 +32,12 @@ class FfiDiscoveryApi implements NativeDiscoveryApi {
         ? '${File(Platform.resolvedExecutable).parent.path}/mirquova_core.dll'
         : Platform.isMacOS
         ? '${File(Platform.resolvedExecutable).parent.parent.path}/Frameworks/libmirquova_core.dylib'
+        : Platform.isLinux
+        ? '${File(Platform.resolvedExecutable).parent.path}/lib/libmirquova_core.so'
         : 'libmirquova_core.so';
-    final library = DynamicLibrary.open(path);
+    final library = Platform.isIOS && override.isEmpty
+        ? DynamicLibrary.process()
+        : DynamicLibrary.open(path);
     if (library.lookupFunction<_Version, int Function()>('mq_abi_version')() !=
         2) {
       throw const FormatException('Unsupported core ABI');

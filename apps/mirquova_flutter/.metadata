@@ -22,6 +22,18 @@ migration:
       create_revision: 737ba8f885dc774b53b442759999a312c9461e4e
       base_revision: 737ba8f885dc774b53b442759999a312c9461e4e
 
+    - platform: macos
+      create_revision: 737ba8f885dc774b53b442759999a312c9461e4e
+      base_revision: 737ba8f885dc774b53b442759999a312c9461e4e
+
+    - platform: linux
+      create_revision: 737ba8f885dc774b53b442759999a312c9461e4e
+      base_revision: 737ba8f885dc774b53b442759999a312c9461e4e
+
+    - platform: ios
+      create_revision: 737ba8f885dc774b53b442759999a312c9461e4e
+      base_revision: 737ba8f885dc774b53b442759999a312c9461e4e
+
   # User provided section
 
   # List of Local paths (relative to this file) that should be

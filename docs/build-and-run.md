@@ -1,5 +1,35 @@
 # Build and run
 
+## macOS, Linux, iOS and Android from a Unix shell
+
+The platform runners now include macOS (Apple Silicon), Linux and iOS (ARM64 device/simulator), alongside Windows and Android. These are preview build targets; runner source and CI configuration do not establish tested device support. See [platform build evidence](platform-builds.md) for current results and blockers. The older Windows workstation evidence below remains historical.
+
+Use `scripts/Use-Toolchains.ps1` in PowerShell. For bash/zsh on macOS/Linux, its shell equivalent is:
+
+```sh
+source scripts/Use-Toolchains.sh
+```
+
+It selects project-local SDKs when present and otherwise uses installed tools. Keep Flutter 3.47.8 / Dart 3.13.7 and Rust 1.99.1. Install required Rust targets explicitly; build scripts do not install SDKs, accept licenses or change signing accounts.
+
+| Target | Command from repository root | Output/prerequisite |
+| --- | --- | --- |
+| macOS ARM64 | `bash scripts/Build-macOS.sh` | Full Xcode; ad hoc app ZIP under `artifacts/iteration-04/` |
+| Linux host architecture | `bash scripts/Build-Linux.sh` | Linux + GTK3 build tools; complete `apps/mirquova_flutter/build/linux/<arch>/release/bundle/` |
+| Android ARM64 | `bash scripts/Build-Android.sh` | Android SDK/NDK, JDK, cargo-ndk; `apps/mirquova_flutter/build/app/outputs/flutter-apk/app-debug.apk` |
+| iOS ARM64 device | `bash scripts/Build-iOS.sh device` | Full Xcode, `aarch64-apple-ios`; unsigned `apps/mirquova_flutter/build/ios/iphoneos/Runner.app` |
+| iOS ARM64 simulator | `bash scripts/Build-iOS.sh simulator` | Full Xcode + simulator runtime, `aarch64-apple-ios-sim`; `apps/mirquova_flutter/build/ios/iphonesimulator/Runner.app` |
+
+For Linux, install `clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev` on Ubuntu 24.04; see [Flutter Linux setup](https://docs.flutter.dev/platform-integration/linux/setup). Keep the entire bundle together, including `lib/libmirquova_core.so` and notices. Desktop integration checks can run with `xvfb-run -a flutter test integration_test/native_app_platform_test.dart -d linux --no-pub` from the app directory after building the core.
+
+iOS uses a statically linked Rust library and `DynamicLibrary.process()`; Xcode configurations retain the ABI symbols for lookup. Build the matching Rust target before running from Xcode. The simulator target is Apple Silicon only. iOS discovery uses raw multicast sockets: signing profiles must include Apple's approved [multicast entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.networking.multicast), and the user must grant local-network access. Adding the entitlement file does not grant approval. Device discovery and background cleanup need physical iPhone testing.
+
+An APK runs on Android. For an installable iOS IPA, first configure a valid bundle identity, signing team and provisioning profiles with the multicast entitlement in Xcode. Then set `MIRQUOVA_IOS_EXPORT_OPTIONS` to an export-options plist and run `bash scripts/Build-iOS.sh ipa`. Flutter writes the signed IPA to `apps/mirquova_flutter/build/ios/ipa/`; see [Flutter iOS distribution](https://docs.flutter.dev/deployment/ios). The default device build is unsigned and cannot be installed as an IPA.
+
+CI now includes Linux/macOS checks and packaging, unsigned iOS device/simulator builds, and an uploaded Android debug APK. These run after the workflow reaches GitHub; no remote pass is implied by editing it. Production signing, notarization, installers and device QA remain pending.
+
+On macOS/Linux, verify an Android build with `python3 scripts/verify_apk.py` after activating the toolchains. It checks the ARM64 Rust/Flutter payload, signature and 16 KiB ZIP alignment. Override `MIRQUOVA_ANDROID_BUILD_TOOLS` if using a build-tools version other than 36.0.0.
+
 ## Local toolchains
 
 This workstation has project-local Flutter 3.47.8 / Dart 3.13.7 and Rust 1.99.1 (Windows GNU) under .toolchains. Nothing was added to global PATH. A portable GNU linker is used for Rust. Microsoft C++ Build Tools and the Windows SDK are now installed for Flutter's Windows runner. The project-local Android SDK/NDK and JDK are also installed; both native builds succeed. See iteration-02.md for versions and evidence. Local SDK paths are ignored by version control.

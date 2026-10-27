@@ -4,6 +4,7 @@
 set -euo pipefail
 
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$project_root/scripts/Use-Toolchains.sh"
 
 if [[ "$(uname -s)" != Darwin || "$(uname -m)" != arm64 ]]; then
   printf '%s\n' 'This preview requires an Apple Silicon macOS host and Xcode.' >&2

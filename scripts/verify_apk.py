@@ -11,8 +11,10 @@ with zipfile.ZipFile(apk) as archive:
     abis=sorted({name.split('/')[1] for name in names if name.startswith('lib/') and name.endswith('.so')})
     if abis!=['arm64-v8a']:raise SystemExit(f'Unexpected ABI package set: {abis}')
 print('PASS APK contains Flutter engine, Rust core, manifest and DEX; ARM64 only.')
-for command in [[str(sdk/'build-tools/36.0.0/apksigner.bat'),'verify','--verbose',str(apk)],
-                [str(sdk/'build-tools/36.0.0/zipalign.exe'),'-c','-P','16','4',str(apk)]]:
+build_tools=sdk/'build-tools'/os.environ.get('MIRQUOVA_ANDROID_BUILD_TOOLS', '36.0.0')
+windows=os.name=='nt'
+for command in [[str(build_tools/('apksigner.bat' if windows else 'apksigner')),'verify','--verbose',str(apk)],
+                [str(build_tools/('zipalign.exe' if windows else 'zipalign')),'-c','-P','16','4',str(apk)]]:
     result=subprocess.run(command,text=True,capture_output=True)
     if result.returncode:raise SystemExit(result.stdout+result.stderr)
     if 'apksigner' in command[0]:print(result.stdout)

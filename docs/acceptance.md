@@ -2,6 +2,8 @@
 
 Current preview: 03 (0.2.0+2). Detailed evidence: [iteration-03.md](iteration-03.md). Earlier iteration reports remain historical.
 
+The current source version is 0.3.0+3. New macOS/Linux/iOS build targets and current host verification are tracked separately in [platform-builds.md](platform-builds.md); the Preview 03 evidence below is historical.
+
 ## Foundation checklist
 
 - [x] Preserve all five source plans with verified provenance.

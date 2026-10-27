@@ -1,0 +1,8 @@
+// Build the matching static library with scripts/Build-iOS.sh before Xcode.
+MIRQUOVA_RUST_TARGET = aarch64-apple-ios
+MIRQUOVA_RUST_TARGET[sdk=iphonesimulator*] = aarch64-apple-ios-sim
+ARCHS = arm64
+// Keep the statically linked ABI in the executable in debug builds too.
+ENABLE_DEBUG_DYLIB = NO
+CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements
+OTHER_LDFLAGS = $(inherited) -force_load "$(SRCROOT)/../../../target/$(MIRQUOVA_RUST_TARGET)/release/libmirquova_core.a" -Wl,-export_dynamic -Wl,-u,_mq_abi_version -Wl,-u,_mq_discovery_start -Wl,-u,_mq_discovery_stop -Wl,-u,_mq_discovery_snapshot -Wl,-u,_mq_string_free -Wl,-u,_mq_presence_start -Wl,-u,_mq_presence_stop -framework SystemConfiguration -framework Security -framework Foundation -liconv -lresolv

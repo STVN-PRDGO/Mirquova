@@ -4,7 +4,7 @@
 
 Every screen. One connection.
 
-A Flutter Windows/Android app with a Rust LAN discovery core. Preview 03 (0.2.0+2) adds explicit, time-limited visibility: choose a name, advertise for up to two minutes, and hide at any time. Nearby candidates remain unverified.
+A Flutter app with a Rust LAN discovery core and runners for Windows, Android, macOS, Linux and iOS. Visibility is explicit and time limited: choose a name, advertise for up to two minutes, and hide at any time. Nearby candidates remain unverified. See [platform build evidence](docs/platform-builds.md) for verified builds and remaining requirements; adding a runner does not establish physical-device support.
 
 ## Current capabilities
 
