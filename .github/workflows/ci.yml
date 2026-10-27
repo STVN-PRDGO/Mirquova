@@ -123,6 +123,7 @@ jobs:
           if-no-files-found: error
   ios:
     runs-on: macos-15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -142,7 +143,7 @@ jobs:
           simulator_id="$(xcrun simctl list devices available --json | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(d["udid"] for runtime,devices in data["devices"].items() if "iOS" in runtime for d in devices if "iPhone" in d["name"]))')"
           xcrun simctl boot "$simulator_id"
           xcrun simctl bootstatus "$simulator_id" -b
-          flutter test integration_test/native_app_platform_test.dart -d "$simulator_id" --no-pub
+          python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=600)' flutter test integration_test/native_app_platform_test.dart -d "$simulator_id" --no-pub
       - name: Package unsigned iOS app with notices
         run: |
           mkdir -p artifacts/ios-unsigned-device
