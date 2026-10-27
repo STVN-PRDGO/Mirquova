@@ -5,15 +5,19 @@ import 'package:flutter/material.dart';
 import 'adapters/github_updates.dart';
 import 'adapters/package_updates.dart';
 import 'adapters/native_app_platform.dart';
+import 'adapters/pairing_identity.dart';
+import 'adapters/pairing_transport.dart';
 import 'core/app_platform.dart';
 import 'core/app_updates.dart';
 import 'core/discovery_port.dart';
 import 'features/nearby/nearby_page.dart';
+import 'features/pairing/pairing_page.dart';
 import 'features/settings/settings_page.dart';
 import 'theme.dart';
 
 const destinations = <(String, IconData)>[
   ('Nearby', Icons.radar_outlined),
+  ('Pair', Icons.verified_user_outlined),
   ('Send', Icons.upload_file_outlined),
   ('Receive', Icons.download_outlined),
   ('Cast', Icons.cast_outlined),
@@ -45,6 +49,7 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
   UpdateController? _updates;
   bool _readingVersion = true;
   late final PackageUpdates _packages;
+  PairingController? _pairing;
 
   @override
   void initState() {
@@ -87,6 +92,7 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
         state == AppLifecycleState.detached) {
       widget.discovery.stop();
       widget.discovery.hide();
+      _pairing?.stop();
       _updates?.cancel();
       _packages.cancel();
     }
@@ -98,6 +104,7 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
     widget.discovery.dispose();
     _updates?.dispose();
     _packages.dispose();
+    _pairing?.dispose();
     super.dispose();
   }
 
@@ -112,7 +119,8 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
       }),
       onRemove: (endpoint) => setState(() => _manualEndpoints.remove(endpoint)),
     ),
-    6 => SettingsPage(
+    1 => _pairingPage(),
+    7 => SettingsPage(
       theme: _theme,
       onThemeChanged: (value) => setState(() => _theme = value),
       updates: _updates,
@@ -125,6 +133,41 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
       onNearby: () => setState(() => _selected = 0),
     ),
   };
+
+  Widget _pairingPage() {
+    try {
+      return PairingPage(controller: _pairingController());
+    } on Object catch (error) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Pair devices',
+            style: Theme.of(context).textTheme.headlineLarge,
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Native core setup needed. Pairing requires the bundled Mirquova core.',
+          ),
+          const SizedBox(height: 8),
+          SelectableText('$error'),
+        ],
+      );
+    }
+  }
+
+  PairingController _pairingController() {
+    return _pairing ??= () {
+      final pairingStore = FlutterPairingSecretStore();
+      return PairingController(
+        identities: PairingIdentityRepository(
+          api: FfiPairingIdentityApi(),
+          store: pairingStore,
+        ),
+        trustedPeers: PairingTrustRepository(store: pairingStore),
+      );
+    }();
+  }
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -255,11 +298,11 @@ class _PlannedPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final descriptions = <int, String>{
-      1: 'Choose files and send them after device verification and transfer consent are implemented.',
-      2: 'Incoming files will require your approval. This preview does not accept files or open a transfer server.',
-      3: 'App-to-app screen casting will use native capture permissions and a visible stop control.',
-      4: 'Local playback and offline captions are planned after the connection foundation.',
-      5: 'Verified transfer and casting activity will appear here once those features are available.',
+      2: 'Choose files and send them after transfer consent and streaming are implemented.',
+      3: 'Incoming files will require your approval. This preview does not accept files or open a transfer server.',
+      4: 'App-to-app screen casting will use native capture permissions and a visible stop control.',
+      5: 'Local playback and offline captions are planned after the connection foundation.',
+      6: 'Verified transfer and casting activity will appear here once those features are available.',
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -296,7 +339,7 @@ class _PlannedPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'You can scan your LAN, make this device temporarily visible, and save manual addresses. Secure pairing is the next milestone before sharing becomes available.',
+                  'You can scan your LAN, make this device temporarily visible, and pair devices with a short-lived, fingerprint-verified invitation.',
                 ),
                 const SizedBox(height: 20),
                 FilledButton.icon(

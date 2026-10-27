@@ -8,7 +8,15 @@ publish.workspace = true
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
+aws-lc-rs.workspace = true
+getrandom.workspace = true
 mdns-sd.workspace = true
+rcgen.workspace = true
+rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+socket2.workspace = true
+subtle.workspace = true
 uuid.workspace = true
+x509-parser.workspace = true
+zeroize.workspace = true

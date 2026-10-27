@@ -121,8 +121,10 @@ Apple notarization are required to resolve this for future downloads.
 Physical Mac installation, local-network permission behavior and two-device
 discovery remain unverified. Intel Macs are not supported by this package.
 
-Nearby discovery candidates are unverified. Pairing, transfer, casting,
-playback and online subtitles are not implemented.
+Nearby discovery candidates are unverified. Pairing uses a short-lived,
+one-use TLS invitation, an out-of-band fingerprint comparison, and explicit
+host approval. It remains a preview and has not passed physical-device QA.
+Transfer, casting, playback and online subtitles are not implemented.
 Settings > System updates offers an optional GitHub release check.
 Checks and direct package downloads require consent in Settings; no GitHub page is needed.
 Open downloaded update opens the local archive. Close Mirquova before replacing the app bundle.

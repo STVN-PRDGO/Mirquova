@@ -34,5 +34,7 @@
 	<array>
 		<string>_mirq-presence._tcp</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan a pairing invitation QR code when you choose Scan invitation.</string>
 </dict>
 </plist>

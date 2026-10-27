@@ -3,6 +3,7 @@ on: [push, pull_request]
 jobs:
   rust:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -12,6 +13,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - name: Same-host TLS pairing transport
+        run: cargo test -p mirquova-core --locked pairing_transport::tests::local_private_interface_pairing_ -- --ignored --test-threads=1
       - run: cargo build -p mirquova-core --lib --locked
       - uses: subosito/flutter-action@v2
         with:
@@ -27,8 +30,12 @@ jobs:
         working-directory: apps/mirquova_flutter
       - run: flutter build windows --debug
         working-directory: apps/mirquova_flutter
+      - name: Native pairing identity, trust and route smoke test
+        run: flutter test integration_test/native_app_platform_test.dart -d windows --no-pub --dart-define=MIRQUOVA_CORE_LIBRARY=${{ github.workspace }}/target/debug/mirquova_core.dll
+        working-directory: apps/mirquova_flutter
   android:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -41,27 +48,45 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: '1.99.1'
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android,x86_64-linux-android
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.47.8'
           channel: stable
-      - run: sdkmanager 'ndk;28.2.13676358'
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358'
       - run: cargo install cargo-ndk --version 4.1.2 --locked
-      - run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" cargo ndk -t arm64-v8a --platform 24 -o apps/mirquova_flutter/android/app/src/main/jniLibs build --lib --release --locked
+      - run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" cargo ndk -t arm64-v8a -t x86_64 --platform 24 -o apps/mirquova_flutter/android/app/src/main/jniLibs build --lib --release --locked
       - run: flutter pub get --enforce-lockfile
         working-directory: apps/mirquova_flutter
-      - run: flutter build apk --debug --target-platform android-arm64
+      - run: flutter build apk --debug --target-platform android-arm64,android-x64
         working-directory: apps/mirquova_flutter
+      - name: Verify pairing identity is excluded from Android backups
+        shell: bash
+        run: |
+          manifest="$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree apps/mirquova_flutter/build/app/outputs/flutter-apk/app-debug.apk AndroidManifest.xml)"
+          grep -Fq 'android:allowBackup(0x01010280)=(type 0x12)0x0' <<< "$manifest"
+      - name: Enable KVM for the Android emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: ReactiveCircus/android-emulator-runner@v2
+        name: Android emulator pairing identity, trust and route smoke test
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          script: cd apps/mirquova_flutter && flutter test integration_test/native_app_platform_test.dart -d emulator-5554 --no-pub
       - uses: actions/upload-artifact@v4
         with:
-          name: android-arm64-debug-apk
+          name: android-arm64-x64-debug-apk
           path: |
             apps/mirquova_flutter/build/app/outputs/flutter-apk/app-debug.apk
             THIRD_PARTY_NOTICES.md
             third_party/
           if-no-files-found: error
   desktop-unix:
+    timeout-minutes: 45
     env:
       MIRQUOVA_GOLDEN_PROFILE: macos-15
     strategy:
@@ -80,10 +105,12 @@ jobs:
           flutter-version: '3.47.8'
           channel: stable
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev xvfb
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libstdc++-12-dev xvfb dbus-x11 gnome-keyring
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - name: Same-host TLS pairing transport
+        run: cargo test -p mirquova-core --locked pairing_transport::tests::local_private_interface_pairing_ -- --ignored --test-threads=1
       - run: cargo build -p mirquova-core --lib --locked
       - run: flutter pub get --enforce-lockfile
         working-directory: apps/mirquova_flutter
@@ -110,10 +137,15 @@ jobs:
       - if: runner.os == 'Linux'
         run: bash scripts/Build-Linux.sh
       - if: runner.os == 'Linux'
-        run: xvfb-run -a flutter test integration_test/native_app_platform_test.dart -d linux --no-pub
+        name: Linux pairing identity, trust and route smoke test
+        run: xvfb-run -a dbus-run-session -- bash -c 'echo "" | gnome-keyring-daemon --unlock --daemonize --components=secrets; flutter test integration_test/native_app_platform_test.dart -d linux --no-pub --dart-define=MIRQUOVA_CORE_LIBRARY=$GITHUB_WORKSPACE/target/release/libmirquova_core.so'
         working-directory: apps/mirquova_flutter
       - if: runner.os == 'macOS'
         run: bash scripts/Build-macOS.sh
+      - if: runner.os == 'macOS'
+        name: macOS pairing identity, trust and route smoke test
+        run: flutter test integration_test/native_app_platform_test.dart -d macos --no-pub --dart-define=MIRQUOVA_CORE_LIBRARY=$GITHUB_WORKSPACE/target/debug/libmirquova_core.dylib
+        working-directory: apps/mirquova_flutter
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ runner.os }}-preview
@@ -136,14 +168,14 @@ jobs:
           channel: stable
       - run: bash scripts/Build-iOS.sh device
       - run: bash scripts/Build-iOS.sh simulator
-      - name: Offline iOS simulator bridge test
+      - name: iOS native bridge, keychain and Pair route smoke test
         shell: bash
         working-directory: apps/mirquova_flutter
         run: |
           simulator_id="$(xcrun simctl list devices available --json | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(d["udid"] for runtime,devices in data["devices"].items() if "iOS" in runtime for d in devices if "iPhone" in d["name"]))')"
           xcrun simctl boot "$simulator_id"
           xcrun simctl bootstatus "$simulator_id" -b
-          python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=600)' flutter test integration_test/native_app_platform_test.dart -d "$simulator_id" --no-pub
+          python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=600)' flutter test integration_test/native_app_platform_test.dart -d "$simulator_id" --no-pub --verbose
       - name: Package unsigned iOS app with notices
         run: |
           mkdir -p artifacts/ios-unsigned-device

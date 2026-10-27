@@ -1,0 +1,219 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:mirquova/adapters/pairing_identity.dart';
+import 'package:mirquova/adapters/pairing_transport.dart';
+import 'package:mirquova/core/pairing_invitation.dart';
+
+class _Store implements PairingSecretStore {
+  final values = <String, String>{};
+  @override
+  Future<String?> read(String key) async => values[key];
+  @override
+  Future<void> write(String key, String value) async => values[key] = value;
+  @override
+  Future<void> delete(String key) async => values.remove(key);
+}
+
+class _DelayedReadStore extends _Store {
+  final readResult = Completer<String?>();
+  @override
+  Future<String?> read(String key) => readResult.future;
+}
+
+class _Identity implements PairingIdentityApi {
+  @override
+  PairingIdentityMaterial create() => PairingIdentityMaterial(
+    certificateDer: [1, 2, 3],
+    privateKeyPkcs8Der: [4, 5, 6],
+  );
+  @override
+  bool validate(PairingIdentityMaterial identity) => true;
+}
+
+class _Transport implements PairingTransportApi {
+  PairingSnapshot value = const PairingSnapshot();
+  bool stopped = false;
+  int hostStarts = 0;
+  int joinStarts = 0;
+  @override
+  String startHost({
+    required String localIpv4,
+    required int port,
+    required String hostAlias,
+    required PairingIdentityMaterial identity,
+  }) {
+    hostStarts++;
+    return 'payload';
+  }
+
+  @override
+  bool startJoin({
+    required Uint8List invitationPayload,
+    required String confirmedFingerprintSha256,
+    required String alias,
+    required PairingIdentityMaterial identity,
+  }) {
+    joinStarts++;
+    return true;
+  }
+
+  @override
+  PairingSnapshot read() => value;
+  @override
+  bool approve() => true;
+  @override
+  bool reject() => true;
+  @override
+  void stop() => stopped = true;
+}
+
+void main() {
+  test('decodes native snake-case pairing statuses', () {
+    expect(
+      PairingSnapshot.fromJson({'status': 'waiting_for_peer'}).status,
+      PairingStatus.waitingForPeer,
+    );
+    expect(
+      PairingSnapshot.fromJson({'status': 'awaiting_approval'}).status,
+      PairingStatus.awaitingApproval,
+    );
+  });
+
+  test('stopping during identity load prevents a late host listener', () async {
+    final store = _DelayedReadStore();
+    final transport = _Transport();
+    final controller = PairingController(
+      identities: PairingIdentityRepository(api: _Identity(), store: store),
+      trustedPeers: PairingTrustRepository(store: store),
+      api: transport,
+    );
+
+    final start = controller.startHosting(
+      localIpv4: '192.168.1.20',
+      hostAlias: 'Host',
+    );
+    await Future<void>.delayed(Duration.zero);
+    controller.stop();
+    store.readResult.complete(null);
+
+    await expectLater(start, throwsStateError);
+    expect(transport.hostStarts, 0);
+    controller.dispose();
+  });
+
+  test(
+    'a superseded host request cannot clear the current request key',
+    () async {
+      final store = _DelayedReadStore();
+      final transport = _Transport();
+      final controller = PairingController(
+        identities: PairingIdentityRepository(api: _Identity(), store: store),
+        trustedPeers: PairingTrustRepository(store: store),
+        api: transport,
+      );
+
+      final superseded = controller.startHosting(
+        localIpv4: '192.168.1.20',
+        hostAlias: 'Old host request',
+      );
+      await Future<void>.delayed(Duration.zero);
+      final current = controller.startHosting(
+        localIpv4: '192.168.1.20',
+        hostAlias: 'Current host request',
+      );
+      await Future<void>.delayed(Duration.zero);
+      store.readResult.complete(null);
+
+      await expectLater(superseded, throwsStateError);
+      expect(await current, 'payload');
+      expect(transport.hostStarts, 1);
+      controller.dispose();
+    },
+  );
+
+  test('stopping during identity load prevents a late join attempt', () async {
+    final store = _DelayedReadStore();
+    final transport = _Transport();
+    final controller = PairingController(
+      identities: PairingIdentityRepository(api: _Identity(), store: store),
+      trustedPeers: PairingTrustRepository(store: store),
+      api: transport,
+    );
+    final invitation = PairingInvitation.parse(
+      jsonEncode({
+        'version': 2,
+        'purpose': 'pairing',
+        'endpoint': {'ipv4': '192.168.1.20', 'port': 45833},
+        'identity_ca_certificate_der_hex': '3000',
+        'secret': List<String>.filled(32, '11').join(),
+        'ttl_seconds': 120,
+      }),
+    );
+
+    final join = controller.join(
+      invitation,
+      alias: 'Phone',
+      fingerprintConfirmed: true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    controller.stop();
+    invitation.dispose();
+    store.readResult.complete(null);
+
+    await expectLater(join, throwsStateError);
+    expect(transport.joinStarts, 0);
+    controller.dispose();
+  });
+
+  test(
+    'stopping clears the active invite without losing a completed pairing',
+    () {
+      final transport = _Transport();
+      final store = _Store();
+      final controller = PairingController(
+        identities: PairingIdentityRepository(api: _Identity(), store: store),
+        trustedPeers: PairingTrustRepository(store: store),
+        api: transport,
+      );
+
+      controller.stop();
+      expect(transport.stopped, isTrue);
+      expect(controller.snapshot.status, PairingStatus.stopped);
+
+      transport.value = const PairingSnapshot(status: PairingStatus.paired);
+      controller.approve();
+      controller.stop();
+      expect(controller.snapshot.status, PairingStatus.paired);
+      controller.dispose();
+    },
+  );
+
+  test('a completed pairing persists its public peer certificate', () async {
+    final transport = _Transport()
+      ..value = PairingSnapshot(
+        status: PairingStatus.paired,
+        peerAlias: 'Phone',
+        peerCaCertificateDer: Uint8List.fromList([0x30, 0x01]),
+      );
+    final store = _Store();
+    final controller = PairingController(
+      identities: PairingIdentityRepository(api: _Identity(), store: store),
+      trustedPeers: PairingTrustRepository(store: store),
+      api: transport,
+    );
+
+    controller.approve();
+    await Future<void>.delayed(Duration.zero);
+    final peers = await PairingTrustRepository(store: store).list();
+    expect(peers.single.alias, 'Phone');
+    expect(peers.single.fingerprintSha256, isNotEmpty);
+    expect(
+      jsonDecode(store.values['mirquova.pairing.trusted_peers.v1']!),
+      isA<List>(),
+    );
+    controller.dispose();
+  });
+}

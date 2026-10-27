@@ -23,10 +23,15 @@ def collect(ecosystem, name, version, directory, license_id):
     destination.mkdir(parents=True, exist_ok=True)
     for original in originals:
         shutil.copyfile(original, destination / original.name)
-    if not originals:
+    # Some split crates omit the repository's license files from the published
+    # archive. Keep a previously preserved upstream notice instead of replacing
+    # it with a false missing marker on each regeneration.
+    preserved = sorted(p for p in destination.iterdir() if p.is_file() and p.name.lower().startswith(('license', 'licence', 'copying', 'notice')))
+    found = bool(originals or preserved)
+    if not found:
         missing.append(f'{ecosystem}:{name}@{version}')
     relative = destination.relative_to(ROOT).as_posix()
-    rows.append((ecosystem, name, version, license_id or 'See original license', relative, bool(originals)))
+    rows.append((ecosystem, name, version, license_id or 'See original license', relative, found))
 
 for package in metadata['packages']:
     if package['source'] is not None:

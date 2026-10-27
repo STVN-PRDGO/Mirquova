@@ -18,6 +18,7 @@ jobs:
   windows:
     name: Build Windows Release Package
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -56,6 +57,7 @@ jobs:
   android:
     name: Build Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -97,6 +99,7 @@ jobs:
   macos:
     name: Build macOS Release Package
     runs-on: macos-15
+    timeout-minutes: 45
     env:
       MIRQUOVA_GOLDEN_PROFILE: macos-15
     steps:
@@ -124,6 +127,7 @@ jobs:
   linux:
     name: Build Linux Release Package
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -135,12 +139,12 @@ jobs:
           channel: stable
           cache: true
       - name: Install Linux build prerequisites
-        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev xvfb
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libstdc++-12-dev xvfb dbus-x11 gnome-keyring
       - name: Build Flutter and Rust Linux release bundle
         run: bash scripts/Build-Linux.sh
       - name: Verify bundled native core and app metadata
         working-directory: apps/mirquova_flutter
-        run: xvfb-run -a flutter test integration_test/native_app_platform_test.dart -d linux --no-pub
+        run: xvfb-run -a dbus-run-session -- bash -c 'echo "" | gnome-keyring-daemon --unlock --daemonize --components=secrets; flutter test integration_test/native_app_platform_test.dart -d linux --no-pub --dart-define=MIRQUOVA_CORE_LIBRARY=$GITHUB_WORKSPACE/target/release/libmirquova_core.so'
       - name: Package Linux tarball
         run: |
           test -f apps/mirquova_flutter/build/linux/x64/release/bundle/lib/libmirquova_core.so
@@ -158,6 +162,7 @@ jobs:
   ios:
     name: Build iOS Unsigned Device App
     runs-on: macos-15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -200,6 +205,7 @@ jobs:
     name: Publish GitHub Release
     needs: [windows, android, macos, linux, ios]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Download Windows package
@@ -251,8 +257,8 @@ jobs:
 
           #### Notes
           - For this trusted macOS preview only, an alternative is to run `xattr -dr com.apple.quarantine /Applications/mirquova.app` followed by `open /Applications/mirquova.app` in Terminal. This removes quarantine only from this app; it does not notarize it or disable Gatekeeper globally. Changing the archive format does not resolve notarization.
-          - Preview functionality includes consented LAN presence and discovery of unverified candidates. Pairing, transfers, casting and playback remain unavailable.
-          - Native builds do not establish physical-device installation, permission behavior or two-device discovery. Production signing and distribution QA remain pending.
+          - Preview functionality includes consented LAN presence and discovery of unverified candidates. Pairing is implemented as a short-lived, fingerprint-confirmed TLS preview with host approval, but has not passed cross-device QA. Transfers, casting and playback remain unavailable.
+          - Native builds do not establish physical-device installation, permission behavior or two-device pairing. Production signing and distribution QA remain pending.
           - macOS, Linux and iOS packages include third-party notices and adjacent SHA-256 checksum files.
           TXT
           gh release create "$TAG" \

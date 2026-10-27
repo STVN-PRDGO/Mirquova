@@ -6,6 +6,8 @@
 	<string>Discover Mirquova devices on your local network when you choose Scan nearby or Make discoverable.</string>
 	<key>NSBonjourServices</key>
 	<array><string>_mirq-presence._tcp</string></array>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan a pairing invitation QR code when you choose Scan invitation.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

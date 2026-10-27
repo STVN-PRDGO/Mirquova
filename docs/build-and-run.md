@@ -22,11 +22,13 @@ It selects project-local SDKs when present and otherwise uses installed tools. K
 
 For Linux, install `clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev` on Ubuntu 24.04; see [Flutter Linux setup](https://docs.flutter.dev/platform-integration/linux/setup). Keep the entire bundle together, including `lib/libmirquova_core.so` and notices. Desktop integration checks can run with `xvfb-run -a flutter test integration_test/native_app_platform_test.dart -d linux --no-pub` from the app directory after building the core.
 
+Linux pairing identity and peer pins use the desktop Secret Service through `libsecret`; install `libsecret-1-0` and `libsecret-1-dev` and run a Secret Service keyring such as GNOME Keyring. Pairing storage fails closed when that service is unavailable. CI now provisions the development library and a temporary keyring for the native integration smoke test.
+
 iOS uses a statically linked Rust library and `DynamicLibrary.process()`; Xcode configurations retain the ABI symbols for lookup. Build the matching Rust target before running from Xcode. The simulator target is Apple Silicon only. iOS discovery uses raw multicast sockets: signing profiles must include Apple's approved [multicast entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.networking.multicast), and the user must grant local-network access. Adding the entitlement file does not grant approval. Device discovery and background cleanup need physical iPhone testing.
 
 An APK runs on Android. For an installable iOS IPA, first configure a valid bundle identity, signing team and provisioning profiles with the multicast entitlement in Xcode. Then set `MIRQUOVA_IOS_EXPORT_OPTIONS` to an export-options plist and run `bash scripts/Build-iOS.sh ipa`. Flutter writes the signed IPA to `apps/mirquova_flutter/build/ios/ipa/`; see [Flutter iOS distribution](https://docs.flutter.dev/deployment/ios). The default device build is unsigned and cannot be installed as an IPA.
 
-CI now includes Linux/macOS checks and packaging, unsigned iOS device/simulator builds, and an uploaded Android debug APK. These run after the workflow reaches GitHub; no remote pass is implied by editing it. Production signing, notarization, installers and device QA remain pending.
+CI includes Linux/macOS checks and packaging, unsigned iOS device/simulator builds, and an Android debug APK. The workflow is configured to exercise the OS keychain/keystore and native identity API on Windows, Android emulator, Linux, macOS and iOS simulator. These results require a new CI run; editing the workflow is not a remote pass. Production signing, notarization, installers and physical-device QA remain pending.
 
 On macOS/Linux, verify an Android build with `python3 scripts/verify_apk.py` after activating the toolchains. It checks the ARM64 Rust/Flutter payload, signature and 16 KiB ZIP alignment. Override `MIRQUOVA_ANDROID_BUILD_TOOLS` if using a build-tools version other than 36.0.0.
 
@@ -45,7 +47,7 @@ This removes download quarantine only from this app. It does not notarize the ap
 
 ## Local toolchains
 
-This workstation has project-local Flutter 3.47.8 / Dart 3.13.7 and Rust 1.99.1 (Windows GNU) under .toolchains. Nothing was added to global PATH. A portable GNU linker is used for Rust. Microsoft C++ Build Tools and the Windows SDK are now installed for Flutter's Windows runner. The project-local Android SDK/NDK and JDK are also installed; both native builds succeed. See iteration-02.md for versions and evidence. Local SDK paths are ignored by version control.
+This workstation has project-local Flutter 3.47.8 / Dart 3.13.7 and Rust 1.99.1 (Windows GNU) under .toolchains. Nothing was added to global PATH. A portable GNU linker is used for Rust. Microsoft C++ Build Tools and the Windows SDK are installed for Flutter's Windows runner. The project-local Android SDK/NDK and JDK are also installed. Historical pre-pairing build results are in iteration-02.md; current pairing build results are recorded in the section below. Local SDK paths are ignored by version control.
 
 On this host scripts are disabled by the persistent PowerShell policy. Use a new process with a process-only override:
 
@@ -144,9 +146,11 @@ With dependencies resolved and FLUTTER_ROOT set:
 
 Review THIRD_PARTY_NOTICES.md and preserved originals before release. No project code license or brand clearance is implied.
 
-## Verified native build workflow
+## Pairing build status
 
-The required tooling is now installed on this workstation. Microsoft Build Tools 2022 and Windows SDK are registered with the machine; the selected C++ tools live under .toolchains/vs-buildtools. Android SDK/NDK and Temurin JDK are project-local. Standard SDK licenses were accepted during authorized setup. Use-Toolchains.ps1 configures the environment for the current shell; no global PATH edit is required.
+On the current Windows workstation, the Rust Windows release library builds with the pairing implementation. The Flutter Windows app build stops before compilation because Flutter plugins require symlink support and Windows Developer Mode is disabled. The Android ARM64 Rust release library also builds, but the pairing APK currently stops during Gradle dependency resolution because Google Maven downloads fail with `Permission denied: getsockopt`. The older APK documented in `platform-builds.md` was built before pairing and does not verify this implementation. See the dated platform evidence for CI, iOS, Linux, macOS and physical-device gaps.
+
+The project-local Microsoft Build Tools, Android SDK/NDK and Temurin JDK remain available. Use-Toolchains.ps1 configures the environment for the current shell; no global PATH edit is required.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Windows.ps1 -Mode release
@@ -154,7 +158,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Android.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-Windows.ps1
 ```
 
-The native integration test opts into presence, completes a six-second scan, verifies self filtering, cancels another scan, and hides presence in the actual Windows runner. It saves a rendered view to local-evidence/windows-native.png. It does not require a discovered peer or establish two-device connectivity.
+After enabling Developer Mode and restoring the Google Maven network path, the commands above can verify current Flutter plugin builds. The native integration test opts into presence, completes a six-second scan, verifies self filtering, cancels another scan, and hides presence in the actual Windows runner. It saves a rendered view to local-evidence/windows-native.png. It does not require a discovered peer or establish two-device connectivity.
 
 To verify/package the existing build outputs, enter a PowerShell process with the toolchain environment loaded, then run:
 

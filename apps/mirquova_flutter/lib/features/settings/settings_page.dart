@@ -64,7 +64,7 @@ class SettingsPage extends StatelessWidget {
       ),
       const SizedBox(height: 16),
       const Text(
-        'Manual addresses, appearance, and update results stay in memory for this session. Pairing and trusted-device storage are not available yet.',
+        'Manual addresses, appearance, and update results stay in memory for this session. Pairing identities and trusted-device records use OS-backed secure storage when the platform service is available.',
       ),
     ],
   );

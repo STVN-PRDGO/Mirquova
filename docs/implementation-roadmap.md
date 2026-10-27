@@ -33,7 +33,7 @@ Limit initial implementation to infrastructure and discovery. Use source-plan co
 
 ## Current progress
 
-Preview 03 completes local infrastructure builds and adds opted-in, expiring LAN presence. Physical two-device discovery remains outstanding. Pairing has a design review but no implementation; see iteration-03.md and pairing-design-review.md.
+Preview 03 completes local infrastructure builds and adds opted-in, expiring LAN presence. Physical two-device discovery remains outstanding. The pairing slice now includes a TLS 1.3 one-use invitation handshake, a separate mutual-certificate authenticated approval handshake, fingerprint confirmation, explicit host approval, OS-backed identity/trust storage, and local revoke controls. Rust unit tests and Flutter parser/storage tests pass on the Windows development host; all four opt-in same-host private-interface transport scenarios pass, covering approval, rejection, competing joiners, and rejection of a prior invitation after restart. A local Android pairing release APK now builds, but cross-platform native runtime checks and Windows-to-Android device acceptance remain outstanding; trusted pins are not yet consumed by a later data session because transfer/casting services are not implemented. See iteration-03.md, pairing-design-review.md, and platform-builds.md.
 
 The requested app-update slice adds consented stable-release checks, direct package downloads with published-digest checks, and a local system package handoff in Settings. It does not complete Distribution: production signing, automatic desktop replacement, rollback and installation QA remain pending. See app-updates.md for the release contract and verification limits.
 

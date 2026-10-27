@@ -36,8 +36,12 @@ symbols = subprocess.check_output(['xcrun', 'nm', '-gU', sys.argv[1]], text=True
 exports = {line.split()[-1] for line in symbols.splitlines() if line.split()}
 for name in ['mq_abi_version', 'mq_discovery_start', 'mq_discovery_stop',
              'mq_discovery_snapshot', 'mq_string_free', 'mq_presence_start',
-             'mq_presence_stop']:
+             'mq_presence_stop', 'mq_pairing_identity_create',
+             'mq_pairing_identity_free', 'mq_pairing_identity_validate',
+             'mq_pairing_host_start', 'mq_pairing_join',
+             'mq_pairing_approve', 'mq_pairing_reject',
+             'mq_pairing_snapshot', 'mq_pairing_stop']:
     if '_' + name not in exports:
         raise SystemExit('Missing iOS native ABI export: ' + name)
-print('PASS all seven Rust discovery ABI exports are linked into the iOS app.')
+print('PASS all sixteen Rust discovery and pairing ABI exports are linked into the iOS app.')
 PY

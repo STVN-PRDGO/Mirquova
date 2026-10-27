@@ -333,7 +333,7 @@ class NearbyPage extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Discovery names are claims, not verified identities. File transfer, pairing, screen casting and playback are not available in this preview.',
+            'Discovery names are claims, not verified identities, and cannot start pairing. Use Pair with an invitation and compare its fingerprint. File transfer, screen casting and playback are not available in this preview.',
           ),
         ],
       );

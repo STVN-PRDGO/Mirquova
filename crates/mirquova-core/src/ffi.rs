@@ -1,10 +1,16 @@
 //! Process-wide discovery/presence ABI v2. No callbacks cross threads or trust boundary.
-use crate::{discovery::Discovery, presence::Presence};
+use crate::{
+    discovery::Discovery,
+    pairing::PairingIdentity,
+    pairing_transport::{HostSession, JoinSession, PairingSnapshot},
+    presence::Presence,
+};
 use std::{
-    ffi::{CString, c_char},
+    ffi::{CStr, CString, c_char},
     ptr,
     sync::{Mutex, OnceLock},
 };
+use zeroize::Zeroize;
 
 #[derive(Default)]
 struct Runtime {
@@ -17,9 +23,312 @@ fn runtime() -> &'static Mutex<Runtime> {
     INSTANCE.get_or_init(|| Mutex::new(Runtime::default()))
 }
 
+#[derive(Default)]
+struct PairingRuntime {
+    active: Option<ActivePairing>,
+}
+
+enum ActivePairing {
+    Host(HostSession),
+    Join(JoinSession),
+}
+
+impl ActivePairing {
+    fn stop(&mut self) {
+        match self {
+            Self::Host(session) => session.stop(),
+            Self::Join(session) => session.stop(),
+        }
+    }
+
+    fn snapshot(&self) -> PairingSnapshot {
+        match self {
+            Self::Host(session) => session.snapshot(),
+            Self::Join(session) => session.snapshot(),
+        }
+    }
+}
+
+fn pairing_runtime() -> &'static Mutex<PairingRuntime> {
+    static INSTANCE: OnceLock<Mutex<PairingRuntime>> = OnceLock::new();
+    INSTANCE.get_or_init(|| Mutex::new(PairingRuntime::default()))
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn mq_abi_version() -> u32 {
     2
+}
+
+#[repr(C)]
+pub struct MqPairingIdentity {
+    certificate_der: *mut u8,
+    certificate_len: u32,
+    private_key_pkcs8_der: *mut u8,
+    private_key_len: u32,
+}
+
+/// Creates an identity for immediate persistence in OS-backed secure storage.
+/// Both buffers contain secret-bearing data and must never be logged.
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_pairing_identity_create() -> *mut MqPairingIdentity {
+    std::panic::catch_unwind(|| {
+        let Ok(identity) = PairingIdentity::generate() else {
+            return ptr::null_mut();
+        };
+        let certificate = identity.certificate_der().to_vec().into_boxed_slice();
+        let private_key = identity.private_key_pkcs8_der().to_vec().into_boxed_slice();
+        let certificate_len = certificate.len() as u32;
+        let private_key_len = private_key.len() as u32;
+        let certificate_der = Box::into_raw(certificate) as *mut u8;
+        let private_key_pkcs8_der = Box::into_raw(private_key) as *mut u8;
+        Box::into_raw(Box::new(MqPairingIdentity {
+            certificate_der,
+            certificate_len,
+            private_key_pkcs8_der,
+            private_key_len,
+        }))
+    })
+    .unwrap_or(ptr::null_mut())
+}
+
+/// # Safety
+/// `identity` must be null or an unfreed pointer returned by
+/// `mq_pairing_identity_create`; free it exactly once with this function.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mq_pairing_identity_free(identity: *mut MqPairingIdentity) {
+    if identity.is_null() {
+        return;
+    }
+    let _ = std::panic::catch_unwind(|| unsafe {
+        let identity = Box::from_raw(identity);
+        zeroize_boxed_bytes(identity.certificate_der, identity.certificate_len);
+        zeroize_boxed_bytes(identity.private_key_pkcs8_der, identity.private_key_len);
+    });
+}
+
+/// # Safety
+/// Both pointers must reference their declared readable byte lengths for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mq_pairing_identity_validate(
+    certificate_der: *const u8,
+    certificate_len: u32,
+    private_key_pkcs8_der: *const u8,
+    private_key_len: u32,
+) -> i32 {
+    if certificate_der.is_null()
+        || private_key_pkcs8_der.is_null()
+        || certificate_len == 0
+        || certificate_len > 512
+        || private_key_len == 0
+        || private_key_len > 4096
+    {
+        return 0;
+    }
+    std::panic::catch_unwind(|| {
+        let certificate =
+            unsafe { std::slice::from_raw_parts(certificate_der, certificate_len as usize) };
+        let private_key =
+            unsafe { std::slice::from_raw_parts(private_key_pkcs8_der, private_key_len as usize) };
+        i32::from(PairingIdentity::from_stored(certificate, private_key).is_ok())
+    })
+    .unwrap_or(-1)
+}
+
+/// # Safety
+/// All pointers must reference their declared readable byte lengths for this call.
+/// The returned invitation JSON contains a bearer secret and must be freed with
+/// `mq_string_free`; never log or persist it outside the active session.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mq_pairing_host_start(
+    local_ipv4: *const u8,
+    address_len: u32,
+    port: u16,
+    host_alias: *const u8,
+    alias_len: u32,
+    certificate_der: *const u8,
+    certificate_len: u32,
+    private_key_pkcs8_der: *const u8,
+    private_key_len: u32,
+) -> *mut c_char {
+    if local_ipv4.is_null()
+        || address_len == 0
+        || address_len > 15
+        || host_alias.is_null()
+        || alias_len == 0
+        || alias_len > 64
+        || certificate_der.is_null()
+        || certificate_len == 0
+        || certificate_len > 512
+        || private_key_pkcs8_der.is_null()
+        || private_key_len == 0
+        || private_key_len > 4096
+    {
+        return ptr::null_mut();
+    }
+    std::panic::catch_unwind(|| {
+        let address = unsafe { std::slice::from_raw_parts(local_ipv4, address_len as usize) };
+        let alias = unsafe { std::slice::from_raw_parts(host_alias, alias_len as usize) };
+        let certificate =
+            unsafe { std::slice::from_raw_parts(certificate_der, certificate_len as usize) };
+        let private_key =
+            unsafe { std::slice::from_raw_parts(private_key_pkcs8_der, private_key_len as usize) };
+        let (Ok(address), Ok(alias)) = (std::str::from_utf8(address), std::str::from_utf8(alias))
+        else {
+            return ptr::null_mut();
+        };
+        let (Ok(address), Ok(identity)) = (
+            address.parse(),
+            PairingIdentity::from_stored(certificate, private_key),
+        ) else {
+            return ptr::null_mut();
+        };
+        let Ok(mut session) = HostSession::start(
+            address,
+            port,
+            identity,
+            alias,
+            std::time::Duration::from_secs(120),
+        ) else {
+            return ptr::null_mut();
+        };
+        let Ok(payload) = CString::new(session.payload()) else {
+            session.stop();
+            return ptr::null_mut();
+        };
+        let Ok(mut manager) = pairing_runtime().lock() else {
+            session.stop();
+            return ptr::null_mut();
+        };
+        if let Some(mut active) = manager.active.take() {
+            active.stop();
+        }
+        manager.active = Some(ActivePairing::Host(session));
+        payload.into_raw()
+    })
+    .unwrap_or(ptr::null_mut())
+}
+
+/// # Safety
+/// All pointers must reference their declared readable byte lengths for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mq_pairing_join(
+    invitation_payload: *const u8,
+    payload_len: u32,
+    confirmed_fingerprint_sha256: *const u8,
+    identity_ca_certificate_der: *const u8,
+    certificate_len: u32,
+    private_key_pkcs8_der: *const u8,
+    private_key_len: u32,
+    alias: *const u8,
+    alias_len: u32,
+) -> i32 {
+    if invitation_payload.is_null()
+        || payload_len == 0
+        || payload_len > 2048
+        || confirmed_fingerprint_sha256.is_null()
+        || identity_ca_certificate_der.is_null()
+        || certificate_len == 0
+        || certificate_len > 512
+        || private_key_pkcs8_der.is_null()
+        || private_key_len == 0
+        || private_key_len > 4096
+        || alias.is_null()
+        || alias_len == 0
+        || alias_len > 64
+    {
+        return 0;
+    }
+    std::panic::catch_unwind(|| {
+        let payload =
+            unsafe { std::slice::from_raw_parts(invitation_payload, payload_len as usize) };
+        let fingerprint = unsafe { std::slice::from_raw_parts(confirmed_fingerprint_sha256, 32) };
+        let certificate = unsafe {
+            std::slice::from_raw_parts(identity_ca_certificate_der, certificate_len as usize)
+        };
+        let private_key =
+            unsafe { std::slice::from_raw_parts(private_key_pkcs8_der, private_key_len as usize) };
+        let alias = unsafe { std::slice::from_raw_parts(alias, alias_len as usize) };
+        let (Ok(identity), Ok(alias), Ok(fingerprint)) = (
+            PairingIdentity::from_stored(certificate, private_key),
+            std::str::from_utf8(alias),
+            <&[u8; 32]>::try_from(fingerprint),
+        ) else {
+            return 0;
+        };
+        let Ok(session) = JoinSession::start(payload, fingerprint, identity, alias) else {
+            return 0;
+        };
+        let Ok(mut manager) = pairing_runtime().lock() else {
+            return 0;
+        };
+        if let Some(mut active) = manager.active.take() {
+            active.stop();
+        }
+        manager.active = Some(ActivePairing::Join(session));
+        1
+    })
+    .unwrap_or(-1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_pairing_approve() -> i32 {
+    std::panic::catch_unwind(|| {
+        pairing_runtime()
+            .lock()
+            .map(|manager| match &manager.active {
+                Some(ActivePairing::Host(session)) => i32::from(session.approve()),
+                _ => 0,
+            })
+            .unwrap_or(-1)
+    })
+    .unwrap_or(-1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_pairing_reject() -> i32 {
+    std::panic::catch_unwind(|| {
+        pairing_runtime()
+            .lock()
+            .map(|manager| match &manager.active {
+                Some(ActivePairing::Host(session)) => i32::from(session.reject()),
+                _ => 0,
+            })
+            .unwrap_or(-1)
+    })
+    .unwrap_or(-1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_pairing_snapshot() -> *mut c_char {
+    std::panic::catch_unwind(|| {
+        let snapshot = pairing_runtime()
+            .lock()
+            .map(|manager| {
+                manager
+                    .active
+                    .as_ref()
+                    .map(ActivePairing::snapshot)
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        serde_json::to_string(&snapshot)
+            .ok()
+            .and_then(|json| CString::new(json).ok())
+            .map(CString::into_raw)
+            .unwrap_or(ptr::null_mut())
+    })
+    .unwrap_or(ptr::null_mut())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_pairing_stop() {
+    let _ = std::panic::catch_unwind(|| {
+        if let Ok(mut manager) = pairing_runtime().lock()
+            && let Some(mut active) = manager.active.take()
+        {
+            active.stop();
+        }
+    });
 }
 
 #[unsafe(no_mangle)]
@@ -99,9 +408,22 @@ pub extern "C" fn mq_presence_stop() {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mq_string_free(value: *mut c_char) {
     if !value.is_null() {
-        unsafe {
+        let _ = std::panic::catch_unwind(|| unsafe {
+            let length = CStr::from_ptr(value).to_bytes_with_nul().len();
+            std::slice::from_raw_parts_mut(value.cast::<u8>(), length).zeroize();
             drop(CString::from_raw(value));
-        }
+        });
+    }
+}
+
+unsafe fn zeroize_boxed_bytes(value: *mut u8, length: u32) {
+    if value.is_null() || length == 0 {
+        return;
+    }
+    let slice = ptr::slice_from_raw_parts_mut(value, length as usize);
+    unsafe {
+        (&mut *slice).zeroize();
+        drop(Box::from_raw(slice));
     }
 }
 
@@ -125,6 +447,38 @@ mod tests {
         }
         unsafe {
             mq_string_free(std::ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn pairing_identity_ffi_returns_valid_key_material_without_debugging_it() {
+        let pointer = mq_pairing_identity_create();
+        assert!(!pointer.is_null());
+        let identity = unsafe { &*pointer };
+        let certificate = unsafe {
+            std::slice::from_raw_parts(identity.certificate_der, identity.certificate_len as usize)
+        };
+        let private_key = unsafe {
+            std::slice::from_raw_parts(
+                identity.private_key_pkcs8_der,
+                identity.private_key_len as usize,
+            )
+        };
+        assert!(!certificate.is_empty());
+        assert!(!private_key.is_empty());
+        assert_eq!(
+            unsafe {
+                mq_pairing_identity_validate(
+                    certificate.as_ptr(),
+                    certificate.len() as u32,
+                    private_key.as_ptr(),
+                    private_key.len() as u32,
+                )
+            },
+            1
+        );
+        unsafe {
+            mq_pairing_identity_free(pointer);
         }
     }
 }
