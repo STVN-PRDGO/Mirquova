@@ -10,6 +10,8 @@ jobs:
   macos:
     name: Build and test Apple Silicon preview
     runs-on: macos-15
+    env:
+      MIRQUOVA_GOLDEN_PROFILE: macos-15
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4

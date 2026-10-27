@@ -62,6 +62,8 @@ jobs:
             third_party/
           if-no-files-found: error
   desktop-unix:
+    env:
+      MIRQUOVA_GOLDEN_PROFILE: macos-15
     strategy:
       fail-fast: false
       matrix:
@@ -97,7 +99,7 @@ jobs:
           if [[ "$RUNNER_OS" == macOS ]]; then extension=dylib; fi
           visual_args=()
           if [[ "$RUNNER_OS" != macOS ]]; then visual_args=(--exclude-tags golden); fi
-          flutter test --no-pub "${visual_args[@]}" --dart-define=MIRQUOVA_CORE_LIBRARY="$GITHUB_WORKSPACE/target/debug/libmirquova_core.$extension"
+          flutter test --no-pub "${visual_args[@]}" --dart-define=MIRQUOVA_GOLDEN_PROFILE="$MIRQUOVA_GOLDEN_PROFILE" --dart-define=MIRQUOVA_CORE_LIBRARY="$GITHUB_WORKSPACE/target/debug/libmirquova_core.$extension"
       - name: Upload visual comparison failures
         if: failure()
         uses: actions/upload-artifact@v4

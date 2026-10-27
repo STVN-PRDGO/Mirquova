@@ -97,6 +97,8 @@ jobs:
   macos:
     name: Build macOS Release Package
     runs-on: macos-15
+    env:
+      MIRQUOVA_GOLDEN_PROFILE: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

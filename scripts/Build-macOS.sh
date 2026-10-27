@@ -71,6 +71,7 @@ flutter --suppress-analytics --no-version-check analyze --no-pub
 # macOS is the reference raster host for the exact golden-image comparisons.
 # Run the complete suite so new tests are included automatically.
 flutter --suppress-analytics --no-version-check test --no-pub \
+  "--dart-define=MIRQUOVA_GOLDEN_PROFILE=${MIRQUOVA_GOLDEN_PROFILE:-local}" \
   "--dart-define=MIRQUOVA_CORE_LIBRARY=$MIRQUOVA_CORE_BUNDLE"
 flutter --suppress-analytics --no-version-check build macos --release --no-pub
 app_path="$PWD/build/macos/Build/Products/Release/mirquova.app"
