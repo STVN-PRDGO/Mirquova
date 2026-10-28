@@ -165,7 +165,12 @@ jobs:
           test_log="$RUNNER_TEMP/macos-flutter-tests.log"
           if [[ "$RUNNER_OS" == macOS ]]; then
             set -o pipefail
-            flutter test --no-pub --reporter expanded "${visual_args[@]}" --dart-define=MIRQUOVA_GOLDEN_PROFILE="$MIRQUOVA_GOLDEN_PROFILE" --dart-define=MIRQUOVA_CORE_LIBRARY="$GITHUB_WORKSPACE/target/debug/libmirquova_core.$extension" 2>&1 | tee "$test_log"
+            if flutter test --no-pub --reporter expanded "${visual_args[@]}" --dart-define=MIRQUOVA_GOLDEN_PROFILE="$MIRQUOVA_GOLDEN_PROFILE" --dart-define=MIRQUOVA_CORE_LIBRARY="$GITHUB_WORKSPACE/target/debug/libmirquova_core.$extension" 2>&1 | tee "$test_log"; then
+              :
+            else
+              python3 "$GITHUB_WORKSPACE/scripts/report_flutter_test_failures.py" "$test_log" "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
           else
             flutter test --no-pub "${visual_args[@]}" --dart-define=MIRQUOVA_GOLDEN_PROFILE="$MIRQUOVA_GOLDEN_PROFILE" --dart-define=MIRQUOVA_CORE_LIBRARY="$GITHUB_WORKSPACE/target/debug/libmirquova_core.$extension"
           fi
