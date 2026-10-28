@@ -98,7 +98,7 @@ jobs:
           arch: x86_64
           script: |
             cd apps/mirquova_flutter
-            python3 "$GITHUB_WORKSPACE/scripts/run_logged_flutter_smoke.py" "$RUNNER_TEMP/android-native-smoke.log" "$GITHUB_STEP_SUMMARY" "Android emulator" timeout 300s flutter test integration_test/native_app_platform_test.dart -d emulator-5554 --no-pub --reporter expanded
+            python3 "$GITHUB_WORKSPACE/scripts/run_logged_flutter_smoke.py" "$RUNNER_TEMP/android-native-smoke.log" "$GITHUB_STEP_SUMMARY" "Android emulator" timeout 300s flutter test integration_test/native_app_platform_test.dart -d emulator-5554 --no-pub --reporter expanded --verbose
       - name: Upload Android native smoke log
         if: failure()
         uses: actions/upload-artifact@v4
