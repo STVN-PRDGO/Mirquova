@@ -51,7 +51,7 @@ native_markers = [line.strip() for line in lines if "[native-pairing-smoke]" in 
 
 if not failed:
     failed = ["Flutter exited with failure; no expanded [E] test line was found."]
-tail = [line.strip() for line in lines[-40:] if line.strip()]
+tail = [line.strip() for line in lines[-25:] if line.strip()]
 
 summary = [f"## {platform} Flutter test failures", ""]
 for message in failed:
@@ -76,12 +76,13 @@ for message, context in failure_details[:10]:
     )
     summary.extend(["", f"### {message}", "", context])
 if tail:
-    excerpt = "\n".join(tail)[:6000]
-    print(
-        f"::error title={platform} final test output::"
-        f"{escape_workflow_command(excerpt)}"
-    )
-    summary.extend(["", "### Final test output", "", excerpt])
+    summary.extend(["", "### Final test output", ""])
+    summary.extend(f"- {line[:500]}" for line in tail)
+    for line in tail:
+        print(
+            f"::error title={platform} test output::"
+            f"{escape_workflow_command(line[:500])}"
+        )
 if native_markers:
     summary.extend(["", "### Native smoke progress", ""])
     summary.extend(f"- {line[:500]}" for line in native_markers[-5:])
