@@ -1,5 +1,8 @@
 name: Foundation checks
 on: [push, pull_request]
+concurrency:
+  group: foundation-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   rust:
     runs-on: windows-latest
@@ -175,10 +178,6 @@ jobs:
         working-directory: apps/mirquova_flutter
       - if: runner.os == 'macOS'
         run: bash scripts/Build-macOS.sh
-      - if: runner.os == 'macOS'
-        name: macOS pairing identity, trust and route smoke test
-        run: flutter test integration_test/native_app_platform_test.dart -d macos --no-pub --dart-define=MIRQUOVA_CORE_LIBRARY=$GITHUB_WORKSPACE/target/debug/libmirquova_core.dylib
-        working-directory: apps/mirquova_flutter
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ runner.os }}-preview
@@ -208,7 +207,7 @@ jobs:
           simulator_id="$(xcrun simctl list devices available --json | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(d["udid"] for runtime,devices in data["devices"].items() if "iOS" in runtime for d in devices if "iPhone" in d["name"]))')"
           xcrun simctl boot "$simulator_id"
           xcrun simctl bootstatus "$simulator_id" -b
-          python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=600)' flutter test integration_test/native_app_platform_test.dart -d "$simulator_id" --no-pub --verbose
+          python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' flutter test integration_test/native_app_platform_test.dart -d "$simulator_id" --no-pub --verbose
       - name: Package unsigned iOS app with notices
         run: |
           mkdir -p artifacts/ios-unsigned-device

@@ -84,8 +84,9 @@ if [[ "$(lipo -archs "$app_path/Contents/MacOS/mirquova")" != arm64 ]]; then
   exit 1
 fi
 codesign --verify --deep --strict --verbose=2 "$app_path"
-flutter --suppress-analytics --no-version-check test \
-  integration_test/native_app_platform_test.dart -d macos --no-pub
+python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' \
+  flutter --suppress-analytics --no-version-check test \
+  integration_test/native_app_platform_test.dart -d macos --no-pub --verbose
 codesign --verify --deep --strict --verbose=2 "$app_path"
 
 mkdir -p "$destination" "$project_root/.toolchains"
