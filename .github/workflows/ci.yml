@@ -96,7 +96,16 @@ jobs:
           api-level: 35
           target: google_apis
           arch: x86_64
-          script: cd apps/mirquova_flutter && flutter test integration_test/native_app_platform_test.dart -d emulator-5554 --no-pub
+          script: |
+            cd apps/mirquova_flutter
+            python3 "$GITHUB_WORKSPACE/scripts/run_logged_flutter_smoke.py" "$RUNNER_TEMP/android-native-smoke.log" "$GITHUB_STEP_SUMMARY" "Android emulator" timeout 300s flutter test integration_test/native_app_platform_test.dart -d emulator-5554 --no-pub --reporter expanded
+      - name: Upload Android native smoke log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-native-smoke-log
+          path: ${{ runner.temp }}/android-native-smoke.log
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: android-arm64-x64-debug-apk
@@ -168,7 +177,7 @@ jobs:
             if flutter test --no-pub --reporter expanded "${visual_args[@]}" --dart-define=MIRQUOVA_GOLDEN_PROFILE="$MIRQUOVA_GOLDEN_PROFILE" --dart-define=MIRQUOVA_CORE_LIBRARY="$GITHUB_WORKSPACE/target/debug/libmirquova_core.$extension" 2>&1 | tee "$test_log"; then
               :
             else
-              python3 "$GITHUB_WORKSPACE/scripts/report_flutter_test_failures.py" "$test_log" "$GITHUB_STEP_SUMMARY"
+              python3 "$GITHUB_WORKSPACE/scripts/report_flutter_test_failures.py" "$test_log" "$GITHUB_STEP_SUMMARY" "macOS"
               exit 1
             fi
           else
@@ -250,8 +259,12 @@ jobs:
         run: |
           echo "Starting native iOS pairing smoke test on $SIMULATOR_ID"
           set -o pipefail
-          python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' flutter test integration_test/native_app_platform_test.dart -d "$SIMULATOR_ID" --no-pub --verbose 2>&1 | tee "$RUNNER_TEMP/ios-native-smoke.log"
-          echo "Native iOS pairing smoke test passed."
+          if python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' flutter test integration_test/native_app_platform_test.dart -d "$SIMULATOR_ID" --no-pub --verbose --reporter expanded 2>&1 | tee "$RUNNER_TEMP/ios-native-smoke.log"; then
+            echo "Native iOS pairing smoke test passed."
+          else
+            python3 "$GITHUB_WORKSPACE/scripts/report_flutter_test_failures.py" "$RUNNER_TEMP/ios-native-smoke.log" "$GITHUB_STEP_SUMMARY" "iOS simulator"
+            exit 1
+          fi
       - name: Upload iOS native smoke log
         if: failure()
         uses: actions/upload-artifact@v4
