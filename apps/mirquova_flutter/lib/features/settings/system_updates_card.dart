@@ -74,74 +74,171 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
     final release = status == UpdateStatus.available ? updates?.release : null;
     final lastChecked = updates?.lastChecked;
     final localizations = MaterialLocalizations.of(context);
+    final colors = Theme.of(context).colorScheme;
+    final statusText = switch (status) {
+      UpdateStatus.idle => 'Ready to check',
+      UpdateStatus.checking => 'Checking for updates...',
+      UpdateStatus.available => 'New release available',
+      UpdateStatus.upToDate => 'No newer version available',
+      UpdateStatus.noRelease => 'No public release available',
+      UpdateStatus.error => 'Could not check for updates',
+      null =>
+        widget.readingVersion
+            ? 'Preparing update checks'
+            : 'Read the installed version before checking for updates.',
+    };
+    final statusIcon = switch (status) {
+      UpdateStatus.checking => Icons.sync,
+      UpdateStatus.available => Icons.system_update_alt,
+      UpdateStatus.upToDate => Icons.check_circle_outline,
+      UpdateStatus.noRelease => Icons.public_off,
+      UpdateStatus.error => Icons.error_outline,
+      _ => Icons.info_outline,
+    };
+    final statusColor = switch (status) {
+      UpdateStatus.available || UpdateStatus.upToDate => colors.primary,
+      UpdateStatus.error => colors.error,
+      _ => colors.onSurfaceVariant,
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('System updates', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
         const Text('Keep your Mirquova app up to date.'),
-        const SizedBox(height: 16),
-        Text(
-          updates != null
-              ? 'Installed version: ${updates.currentVersion}'
-              : widget.readingVersion
-              ? 'Reading installed version...'
-              : 'Installed version unavailable',
-        ),
-        const SizedBox(height: 16),
-        Semantics(
-          liveRegion: true,
-          child: Text(switch (status) {
-            UpdateStatus.idle => 'Ready to check',
-            UpdateStatus.checking => 'Checking for updates...',
-            UpdateStatus.available => 'New release available',
-            UpdateStatus.upToDate => 'No newer version available',
-            UpdateStatus.noRelease => 'No public release available',
-            UpdateStatus.error => 'Could not check for updates',
-            null =>
-              widget.readingVersion
-                  ? 'Preparing update checks'
-                  : 'Read the installed version before checking for updates.',
-          }, style: Theme.of(context).textTheme.titleMedium),
-        ),
-        if (updates?.message != null) ...[
-          const SizedBox(height: 8),
-          Text(updates!.message!),
-        ],
-        if (checking && !MediaQuery.disableAnimationsOf(context)) ...[
-          const SizedBox(height: 16),
-          const LinearProgressIndicator(semanticsLabel: 'Checking for updates'),
-        ],
-        if (lastChecked != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            'Last checked: ${localizations.formatShortDate(lastChecked.toLocal())}, ${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(lastChecked.toLocal()))}',
+        const SizedBox(height: 20),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: colors.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: colors.outlineVariant),
           ),
-        ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(statusIcon, color: statusColor, size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        statusText,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: statusColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _InfoChip(
+                    icon: Icons.phone_android_outlined,
+                    label: updates != null
+                        ? 'Installed version: ${updates.currentVersion}'
+                        : widget.readingVersion
+                        ? 'Reading installed version...'
+                        : 'Installed version unavailable',
+                  ),
+                  if (lastChecked != null)
+                    _InfoChip(
+                      icon: Icons.schedule_outlined,
+                      label:
+                          'Checked ${localizations.formatShortDate(lastChecked.toLocal())}, ${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(lastChecked.toLocal()))}',
+                    ),
+                ],
+              ),
+              if (updates?.message != null) ...[
+                const SizedBox(height: 12),
+                Text(updates!.message!),
+              ],
+              if (checking && !MediaQuery.disableAnimationsOf(context)) ...[
+                const SizedBox(height: 16),
+                const LinearProgressIndicator(
+                  semanticsLabel: 'Checking for updates',
+                ),
+              ],
+            ],
+          ),
+        ),
         if (release != null) ...[
           const SizedBox(height: 16),
-          Text(
-            'Published version: ${release.version}',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          if (release.notes.isNotEmpty)
-            ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              title: const Text('What\u2019s new'),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colors.primaryContainer.withValues(alpha: 0.38),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colors.primary.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: SelectableText(release.notes),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.new_releases_outlined,
+                          color: colors.primary,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Published version: ${release.version}',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'AVAILABLE',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: colors.primary,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 16),
+                if (release.notes.isNotEmpty)
+                  Material(
+                    color: Colors.transparent,
+                    child: ExpansionTile(
+                      tilePadding: EdgeInsets.zero,
+                      title: const Text('What’s new'),
+                      children: [
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: SelectableText(release.notes),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                    ),
+                  ),
               ],
             ),
-          const SizedBox(height: 8),
+          ),
+          const SizedBox(height: 12),
           const Text(
             'Download the update here, then open the package to finish with your system. Desktop previews require closing Mirquova and replacing the complete app bundle. Android requires system installation approval.',
           ),
         ],
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         Wrap(
           spacing: 12,
           runSpacing: 12,
@@ -180,6 +277,50 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
       ],
     );
   }
+}
+
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final labelWidth = constraints.maxWidth.isFinite
+          ? (constraints.maxWidth - 48).clamp(80.0, constraints.maxWidth)
+          : 240.0;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 6),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: labelWidth),
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
 }
 
 class _PackagePanel extends StatelessWidget {

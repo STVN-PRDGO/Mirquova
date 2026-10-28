@@ -319,6 +319,20 @@ class PairingIdentityRepository {
   final String storageKey;
   Future<PairingIdentityMaterial>? _loading;
   int _loadingWaiters = 0;
+  bool _recoveryRequired = false;
+
+  bool get recoveryRequired => _recoveryRequired;
+
+  /// Removes a corrupt saved identity only after an explicit user decision.
+  /// The next pairing attempt creates a new identity; existing peers may need
+  /// to pair with this installation again.
+  Future<void> resetCorruptIdentity() async {
+    if (!_recoveryRequired || _loading != null) {
+      throw StateError('There is no corrupt pairing identity to reset.');
+    }
+    await store.delete(storageKey);
+    _recoveryRequired = false;
+  }
 
   Future<PairingIdentityMaterial> loadOrCreate() {
     final future = _loading ??= _loadOrCreate();
@@ -347,6 +361,7 @@ class PairingIdentityRepository {
 
   Future<PairingIdentityMaterial> _loadOrCreate() async {
     final stored = await store.read(storageKey);
+    _recoveryRequired = false;
     if (stored != null) {
       PairingIdentityMaterial? identity;
       var retained = false;
@@ -369,6 +384,7 @@ class PairingIdentityRepository {
         retained = true;
         return identity;
       } on Exception {
+        _recoveryRequired = true;
         throw StateError(
           'The saved pairing identity is unavailable or corrupt. Pairing is disabled; reset identity only through an explicit recovery action.',
         );

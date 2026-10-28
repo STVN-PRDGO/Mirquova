@@ -321,6 +321,22 @@ class PairingController extends ChangeNotifier {
   PairingSnapshot get snapshot => _snapshot;
   bool get savingTrust => _savingTrust;
   bool get trustSaveFailed => _trustSaveFailed;
+  bool get identityRecoveryRequired => identities.recoveryRequired;
+
+  Future<void> resetCorruptIdentity() async {
+    if (!identities.recoveryRequired) {
+      throw StateError('There is no corrupt pairing identity to reset.');
+    }
+    _operationGeneration++;
+    _poller?.cancel();
+    _poller = null;
+    _api.stop();
+    await identities.resetCorruptIdentity();
+    _snapshot = const PairingSnapshot();
+    _trustPersistedFingerprint = null;
+    notifyListeners();
+  }
+
   void retryTrustSave() {
     _trustPersistedFingerprint = null;
     _persistTrustedPeerWhenPaired();

@@ -28,7 +28,7 @@ The current source version is 0.3.0+3. New macOS/Linux/iOS build targets and cur
 | Rust Windows core | ABI v2 DLL, unit/network tests, release build | Broader host/device validation |
 | Discovery/visibility | Bounded scans, explicit expiring presence, same-host resolution | Two physical devices and Android runtime |
 | Manual fallback | Private IPv4 candidate validation/removal | Connection and identity verification |
-| Pairing/trust | Design review and bounded invitation input parser; authentication NOT IMPLEMENTED | Authenticated protocol, key storage, adversarial tests |
+| Pairing/trust | Implemented TLS 1.3 one-use invitation and mutually authenticated approval, explicit fingerprint confirmation, secure identity/trust storage and revoke. Windows Rust and Flutter functional/FFI checks pass; Android emulator storage/route smoke and Linux same-host transport have passed. | Passing native smoke on every supported OS; physical Windows ↔ Android pairing, rejection, restart and revoke validation. No transfer/cast session is exposed. |
 | Transfer/casting | NOT IMPLEMENTED | Authenticated consent-scoped engines |
 | Android phone | ARM64 debug APK verified | Device installation, permissions, LAN checks |
 | ACE DE1L LED-909 | UNVERIFIED HARDWARE | OS/ABI, install, remote and decoder tests |
@@ -37,4 +37,4 @@ The current source version is 0.3.0+3. New macOS/Linux/iOS build targets and cur
 | Web receiver/other TVs | NOT IMPLEMENTED | Independent adapters and device tests |
 | P01-P22 | ORIGINAL MATRIX NOT SUPPLIED | Original definitions; no fabricated passes |
 
-No Android/TV installation, throughput benchmark, live subtitle API request, or physical TV test is claimed. GitHub runner results must be checked separately from local evidence.
+The Preview 03 checklist above is historical. Current pairing evidence and platform-specific failures are recorded in [pairing-design-review.md](pairing-design-review.md) and [platform-builds.md](platform-builds.md). No physical Windows ↔ Android pairing, Android/TV installation, throughput benchmark, live subtitle API request, or physical TV test is claimed. GitHub runner results must be checked separately from local evidence.

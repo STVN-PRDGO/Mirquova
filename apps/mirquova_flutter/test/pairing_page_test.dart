@@ -122,6 +122,45 @@ void main() {
     expect(find.text('Stop invitation'), findsOneWidget);
   });
 
+  testWidgets('corrupt identity recovery requires a clear user confirmation', (
+    tester,
+  ) async {
+    const key = 'mirquova.pairing.identity.v1';
+    store.values[key] = '{broken';
+    await tester.pumpWidget(page());
+    await tester.pump();
+
+    await tester.tap(find.text('Create invitation'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Reset corrupt pairing identity'), findsOneWidget);
+    expect(store.values[key], '{broken');
+
+    await tester.tap(find.text('Reset corrupt pairing identity'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Reset this device identity?'), findsOneWidget);
+    expect(
+      find.textContaining('Devices that trusted the old identity'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Cancel'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(store.values[key], '{broken');
+
+    await tester.tap(find.text('Reset corrupt pairing identity'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.text('Reset identity and continue'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(store.values.containsKey(key), isFalse);
+    expect(find.text('Reset corrupt pairing identity'), findsNothing);
+
+    await tester.tap(find.text('Create invitation'));
+    await tester.pump();
+    await tester.pump();
+    expect(store.values.containsKey(key), isTrue);
+    expect(find.text('Stop invitation'), findsOneWidget);
+  });
+
   testWidgets('hiding the app stops pairing and clears the host invitation', (
     tester,
   ) async {

@@ -84,9 +84,15 @@ if [[ "$(lipo -archs "$app_path/Contents/MacOS/mirquova")" != arm64 ]]; then
   exit 1
 fi
 codesign --verify --deep --strict --verbose=2 "$app_path"
-python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' \
-  flutter --suppress-analytics --no-version-check test \
-  integration_test/native_app_platform_test.dart -d macos --no-pub --verbose
+if [[ "${MIRQUOVA_SKIP_NATIVE_SMOKE:-0}" == 1 ]]; then
+  printf '%s\n' 'Native macOS smoke test deferred to the caller.'
+else
+  printf '%s\n' 'Starting the bounded native macOS pairing smoke test.'
+  python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' \
+    flutter --suppress-analytics --no-version-check test \
+    integration_test/native_app_platform_test.dart -d macos --no-pub --verbose
+  printf '%s\n' 'Native macOS pairing smoke test passed.'
+fi
 codesign --verify --deep --strict --verbose=2 "$app_path"
 
 mkdir -p "$destination" "$project_root/.toolchains"

@@ -15,6 +15,12 @@ class _MemorySecretStore implements PairingSecretStore {
   Future<void> delete(String key) async => values.remove(key);
 }
 
+class _UnavailableSecretStore extends _MemorySecretStore {
+  @override
+  Future<String?> read(String key) async =>
+      throw StateError('secure storage is unavailable');
+}
+
 class _PausedWriteSecretStore extends _MemorySecretStore {
   final writeStarted = Completer<void>();
   final finishWrite = Completer<void>();
@@ -157,6 +163,39 @@ void main() {
       expect(store.values['mirquova.pairing.identity.v1'], '{broken');
     },
   );
+
+  test('corrupt identity is replaced only after explicit recovery', () async {
+    final api = _FakeIdentityApi();
+    final store = _MemorySecretStore()
+      ..values['mirquova.pairing.identity.v1'] = '{broken';
+    final repository = PairingIdentityRepository(api: api, store: store);
+
+    await expectLater(repository.loadOrCreate(), throwsStateError);
+    expect(repository.recoveryRequired, isTrue);
+    expect(api.createCount, 0);
+    await repository.resetCorruptIdentity();
+    expect(repository.recoveryRequired, isFalse);
+    expect(store.values, isEmpty);
+    expect(api.createCount, 0);
+
+    final recovered = await repository.loadOrCreate();
+    expect(api.createCount, 1);
+    expect(repository.recoveryRequired, isFalse);
+    recovered.clearPrivateKeyCopy();
+  });
+
+  test('secure-storage errors never enable identity reset', () async {
+    final api = _FakeIdentityApi();
+    final repository = PairingIdentityRepository(
+      api: api,
+      store: _UnavailableSecretStore(),
+    );
+
+    await expectLater(repository.loadOrCreate(), throwsStateError);
+    expect(repository.recoveryRequired, isFalse);
+    await expectLater(repository.resetCorruptIdentity(), throwsStateError);
+    expect(api.createCount, 0);
+  });
 
   test(
     'does not persist an identity rejected by the native validator',

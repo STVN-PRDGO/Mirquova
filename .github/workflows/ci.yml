@@ -177,7 +177,15 @@ jobs:
         run: xvfb-run -a dbus-run-session -- bash -c 'echo "" | gnome-keyring-daemon --unlock --daemonize --components=secrets; flutter test integration_test/native_app_platform_test.dart -d linux --no-pub --dart-define=MIRQUOVA_CORE_LIBRARY=$GITHUB_WORKSPACE/target/release/libmirquova_core.so'
         working-directory: apps/mirquova_flutter
       - if: runner.os == 'macOS'
+        name: Build macOS preview
+        env:
+          MIRQUOVA_SKIP_NATIVE_SMOKE: '1'
         run: bash scripts/Build-macOS.sh
+      - if: runner.os == 'macOS'
+        name: macOS native bridge, keychain and Pair route smoke test
+        shell: bash
+        working-directory: apps/mirquova_flutter
+        run: python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' flutter --suppress-analytics --no-version-check test integration_test/native_app_platform_test.dart -d macos --no-pub --verbose
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ runner.os }}-preview
@@ -200,14 +208,31 @@ jobs:
           channel: stable
       - run: bash scripts/Build-iOS.sh device
       - run: bash scripts/Build-iOS.sh simulator
+      - name: Select iOS simulator for native smoke test
+        id: ios-simulator
+        shell: bash
+        run: |
+          simulator_id="$(xcrun simctl list devices available --json | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(d["udid"] for runtime,devices in data["devices"].items() if "iOS" in runtime for d in devices if "iPhone" in d["name"]))')"
+          echo "id=$simulator_id" >> "$GITHUB_OUTPUT"
+          echo "Selected iOS simulator: $simulator_id"
+      - name: Boot iOS simulator
+        shell: bash
+        env:
+          SIMULATOR_ID: ${{ steps.ios-simulator.outputs.id }}
+        run: |
+          echo "Booting iOS simulator $SIMULATOR_ID"
+          xcrun simctl boot "$SIMULATOR_ID" || xcrun simctl list devices booted | grep -q "$SIMULATOR_ID"
+          python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=180)' xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          echo "iOS simulator boot completed: $SIMULATOR_ID"
       - name: iOS native bridge, keychain and Pair route smoke test
         shell: bash
         working-directory: apps/mirquova_flutter
+        env:
+          SIMULATOR_ID: ${{ steps.ios-simulator.outputs.id }}
         run: |
-          simulator_id="$(xcrun simctl list devices available --json | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(d["udid"] for runtime,devices in data["devices"].items() if "iOS" in runtime for d in devices if "iPhone" in d["name"]))')"
-          xcrun simctl boot "$simulator_id"
-          xcrun simctl bootstatus "$simulator_id" -b
-          python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' flutter test integration_test/native_app_platform_test.dart -d "$simulator_id" --no-pub --verbose
+          echo "Starting native iOS pairing smoke test on $SIMULATOR_ID"
+          python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' flutter test integration_test/native_app_platform_test.dart -d "$SIMULATOR_ID" --no-pub --verbose
+          echo "Native iOS pairing smoke test passed."
       - name: Package unsigned iOS app with notices
         run: |
           mkdir -p artifacts/ios-unsigned-device

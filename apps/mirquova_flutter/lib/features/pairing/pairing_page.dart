@@ -53,7 +53,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
           _address = values.firstOrNull;
         });
       }
-    } on Exception catch (error) {
+    } on Object catch (error) {
       if (mounted) setState(() => _error = '$error');
     }
   }
@@ -151,7 +151,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
           });
         });
       }
-    } on Exception catch (error) {
+    } on Object catch (error) {
       if (mounted) setState(() => _error = '$error');
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -177,7 +177,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
           _error = 'Invitation expired. Read a current invitation to pair.';
         });
       });
-    } on Exception catch (error) {
+    } on Object catch (error) {
       setState(() => _error = 'Invitation could not be read: $error');
     }
   }
@@ -195,7 +195,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
         alias: _joinAlias.text.trim(),
         fingerprintConfirmed: true,
       );
-    } on Exception catch (error) {
+    } on Object catch (error) {
       if (mounted) setState(() => _error = '$error');
     } finally {
       invitation.dispose();
@@ -204,6 +204,42 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
           _clearInvitation();
         });
       }
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _recoverCorruptIdentity() async {
+    final allowed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset this device identity?'),
+        content: const SingleChildScrollView(
+          child: Text(
+            'The saved pairing identity is corrupt and cannot be used. Resetting deletes that saved identity and creates a new one the next time you pair. Devices that trusted the old identity may need to pair with this device again. Your trusted peer list is kept.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Reset identity and continue'),
+          ),
+        ],
+      ),
+    );
+    if (allowed != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.controller.resetCorruptIdentity();
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = '$error');
+    } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -237,7 +273,18 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
             );
           },
         ),
-        if (_error != null) ...[const SizedBox(height: 16), _errorBox(_error!)],
+        if (_error != null) ...[
+          const SizedBox(height: 16),
+          _errorBox(_error!),
+          if (widget.controller.identityRecoveryRequired) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _recoverCorruptIdentity,
+              icon: const Icon(Icons.key_off_outlined),
+              label: const Text('Reset corrupt pairing identity'),
+            ),
+          ],
+        ],
         if (status.status != PairingStatus.idle) ...[
           const SizedBox(height: 18),
           _statusCard(status),
