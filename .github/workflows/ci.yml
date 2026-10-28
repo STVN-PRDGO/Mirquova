@@ -162,13 +162,26 @@ jobs:
           if [[ "$RUNNER_OS" == macOS ]]; then extension=dylib; fi
           visual_args=()
           if [[ "$RUNNER_OS" != macOS ]]; then visual_args=(--exclude-tags golden); fi
-          flutter test --no-pub "${visual_args[@]}" --dart-define=MIRQUOVA_GOLDEN_PROFILE="$MIRQUOVA_GOLDEN_PROFILE" --dart-define=MIRQUOVA_CORE_LIBRARY="$GITHUB_WORKSPACE/target/debug/libmirquova_core.$extension"
+          test_log="$RUNNER_TEMP/macos-flutter-tests.log"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            set -o pipefail
+            flutter test --no-pub --reporter expanded "${visual_args[@]}" --dart-define=MIRQUOVA_GOLDEN_PROFILE="$MIRQUOVA_GOLDEN_PROFILE" --dart-define=MIRQUOVA_CORE_LIBRARY="$GITHUB_WORKSPACE/target/debug/libmirquova_core.$extension" 2>&1 | tee "$test_log"
+          else
+            flutter test --no-pub "${visual_args[@]}" --dart-define=MIRQUOVA_GOLDEN_PROFILE="$MIRQUOVA_GOLDEN_PROFILE" --dart-define=MIRQUOVA_CORE_LIBRARY="$GITHUB_WORKSPACE/target/debug/libmirquova_core.$extension"
+          fi
       - name: Upload visual comparison failures
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: visual-comparison-${{ runner.os }}
           path: apps/mirquova_flutter/test/failures/
+          if-no-files-found: ignore
+      - name: Upload macOS Flutter test log
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-flutter-test-log
+          path: ${{ runner.temp }}/macos-flutter-tests.log
           if-no-files-found: ignore
       - if: runner.os == 'Linux'
         run: bash scripts/Build-Linux.sh
@@ -231,8 +244,16 @@ jobs:
           SIMULATOR_ID: ${{ steps.ios-simulator.outputs.id }}
         run: |
           echo "Starting native iOS pairing smoke test on $SIMULATOR_ID"
-          python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' flutter test integration_test/native_app_platform_test.dart -d "$SIMULATOR_ID" --no-pub --verbose
+          set -o pipefail
+          python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' flutter test integration_test/native_app_platform_test.dart -d "$SIMULATOR_ID" --no-pub --verbose 2>&1 | tee "$RUNNER_TEMP/ios-native-smoke.log"
           echo "Native iOS pairing smoke test passed."
+      - name: Upload iOS native smoke log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-native-smoke-log
+          path: ${{ runner.temp }}/ios-native-smoke.log
+          if-no-files-found: ignore
       - name: Package unsigned iOS app with notices
         run: |
           mkdir -p artifacts/ios-unsigned-device
