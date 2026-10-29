@@ -65,9 +65,11 @@ void main() {
       final generated = await identityRepository.loadOrCreate().timeout(
         const Duration(seconds: 15),
       );
+      debugPrint('[native-pairing-smoke] identity generated and saved');
       final certificate = Uint8List.fromList(generated.certificateDer);
       try {
         expect(identityApi.validate(generated), isTrue);
+        debugPrint('[native-pairing-smoke] generated identity validated');
       } finally {
         generated.clearPrivateKeyCopy();
       }
@@ -78,22 +80,29 @@ void main() {
       try {
         expect(identityApi.validate(restored), isTrue);
         expect(restored.certificateDer, certificate);
+        debugPrint(
+          '[native-pairing-smoke] saved identity reloaded and validated',
+        );
 
         await trustRepository
             .trust(alias: 'Integration probe', certificateDer: certificate)
             .timeout(const Duration(seconds: 15));
+        debugPrint('[native-pairing-smoke] trusted peer stored');
         final peers = await trustRepository.list().timeout(
           const Duration(seconds: 15),
         );
         expect(peers.single.alias, 'Integration probe');
         expect(peers.single.certificateDer, isNotEmpty);
+        debugPrint('[native-pairing-smoke] trusted peer reloaded');
         await trustRepository
             .revoke(peers.single.fingerprintSha256)
             .timeout(const Duration(seconds: 15));
+        debugPrint('[native-pairing-smoke] trusted peer revoked');
         expect(
           await trustRepository.list().timeout(const Duration(seconds: 15)),
           isEmpty,
         );
+        debugPrint('[native-pairing-smoke] revoked peer absent from storage');
       } finally {
         restored.clearPrivateKeyCopy();
       }
@@ -110,6 +119,7 @@ void main() {
     // opened briefly on a private interface and stopped cleanly.
     debugPrint('[native-pairing-smoke] validating pairing FFI boundaries');
     final ffiIdentity = identityApi.create();
+    debugPrint('[native-pairing-smoke] FFI identity generated');
     final pairingFfi = FfiPairingTransportApi();
     try {
       final certificateHex = _encodeHex(ffiIdentity.certificateDer);
@@ -131,6 +141,7 @@ void main() {
         isFalse,
       );
       expect(pairingFfi.read().status.name, 'idle');
+      debugPrint('[native-pairing-smoke] wrong-pin rejection passed');
       expect(
         () => pairingFfi.startHost(
           localIpv4: '8.8.8.8',
@@ -141,6 +152,7 @@ void main() {
         throwsStateError,
       );
       expect(pairingFfi.read().status.name, 'idle');
+      debugPrint('[native-pairing-smoke] public bind rejection passed');
 
       final address = await _privateIpv4Address();
       if (address == null) {
@@ -164,6 +176,7 @@ void main() {
           pairingFfi.stop();
         }
         expect(pairingFfi.read().status.name, 'idle');
+        debugPrint('[native-pairing-smoke] private listener stopped cleanly');
       }
     } finally {
       pairingFfi.stop();
