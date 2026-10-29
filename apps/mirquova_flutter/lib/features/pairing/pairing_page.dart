@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:crypto/crypto.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr/qr.dart';
@@ -27,6 +28,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
   List<String> _addresses = const [];
   String? _hostPayload;
   String? _hostFingerprint;
+  bool _hostInvitationCopied = false;
   String? _error;
   PairingInvitation? _invitation;
   bool _fingerprintConfirmed = false;
@@ -79,6 +81,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
       _invitationExpiry?.cancel();
       _hostPayload = null;
       _hostFingerprint = null;
+      _hostInvitationCopied = false;
     }
     if (widget.controller.snapshot.status == PairingStatus.paired) {
       _trustedList = widget.controller.trustedPeers.list();
@@ -112,6 +115,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
     _invitationExpiry = null;
     _hostPayload = null;
     _hostFingerprint = null;
+    _hostInvitationCopied = false;
     _clearInvitation();
     _payload.clear();
     widget.controller.stop();
@@ -149,6 +153,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
         setState(() {
           _hostPayload = payload;
           _hostFingerprint = fingerprint;
+          _hostInvitationCopied = false;
         });
         _invitationExpiry?.cancel();
         _invitationExpiry = Timer(const Duration(minutes: 2), () {
@@ -157,6 +162,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
           setState(() {
             _hostPayload = null;
             _hostFingerprint = null;
+            _hostInvitationCopied = false;
           });
         });
       }
@@ -253,6 +259,27 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _copyHostInvitation(String payload) async {
+    try {
+      await Clipboard.setData(ClipboardData(text: payload));
+      if (!mounted) return;
+      setState(() => _hostInvitationCopied = true);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Invitation copied. Treat it as a secret; it expires in two minutes.',
+            ),
+          ),
+        );
+    } on Object {
+      if (mounted) {
+        setState(() => _error = 'Could not copy the invitation. Try again.');
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final status = widget.controller.snapshot;
@@ -340,8 +367,18 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
             const SizedBox(height: 16),
             Center(child: _QrCode(payload: payload)),
             const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : () => _copyHostInvitation(payload),
+              icon: Icon(
+                _hostInvitationCopied ? Icons.check : Icons.copy_outlined,
+              ),
+              label: Text(
+                _hostInvitationCopied ? 'Copy invitation again' : 'Copy invitation',
+              ),
+            ),
+            const SizedBox(height: 8),
             const Text(
-              'This invitation expires after two minutes and can pair one device.',
+              'This one-use invitation expires after two minutes. Share it only with the device you intend to pair. The host still has to approve the request.',
             ),
             const SizedBox(height: 8),
             const Text(
@@ -355,6 +392,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
                 setState(() {
                   _hostPayload = null;
                   _hostFingerprint = null;
+                  _hostInvitationCopied = false;
                 });
               },
               icon: const Icon(Icons.stop_circle_outlined),

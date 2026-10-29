@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 typedef _CreateNativeIdentity = Pointer<_NativePairingIdentity> Function();
@@ -160,7 +161,21 @@ abstract interface class PairingSecretStore {
 
 class FlutterPairingSecretStore implements PairingSecretStore {
   FlutterPairingSecretStore([FlutterSecureStorage? storage])
-    : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? storageForPlatform(isMacOS: Platform.isMacOS);
+
+  @visibleForTesting
+  static FlutterSecureStorage storageForPlatform({required bool isMacOS}) {
+    if (isMacOS) {
+      // The data-protection Keychain requires a provisioned Keychain Sharing
+      // entitlement. This ad-hoc preview does not share secrets with another
+      // app, so use the plugin's legacy Keychain mode on macOS.
+      return const FlutterSecureStorage(
+        mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+      );
+    }
+    return const FlutterSecureStorage();
+  }
+
   final FlutterSecureStorage _storage;
 
   @override

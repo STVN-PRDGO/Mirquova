@@ -121,18 +121,26 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(statusIcon, color: statusColor, size: 22),
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(statusIcon, color: statusColor, size: 22),
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Semantics(
                       liveRegion: true,
                       child: Text(
                         statusText,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              color: statusColor,
-                              fontWeight: FontWeight.w600,
-                            ),
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: statusColor,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
@@ -206,12 +214,9 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'AVAILABLE',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colors.primary,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.6,
-                      ),
+                      'A newer version is ready',
+                      style: Theme.of(context).textTheme.bodyMedium
+                          ?.copyWith(color: colors.onSurfaceVariant),
                     ),
                   ],
                 ),
@@ -368,63 +373,78 @@ class _PackagePanel extends StatelessWidget {
     }
     final current = packages.asset?.url == asset.url;
     final ready = current && packages.status == PackageStatus.ready;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Update download', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        Text(
-          '${(asset.size / (1024 * 1024)).toStringAsFixed(1)} MB • SHA-256 checked',
-        ),
-        if (current && packages.message != null) ...[
-          const SizedBox(height: 8),
-          Semantics(liveRegion: true, child: Text(packages.message!)),
-        ],
-        if (current && packages.status == PackageStatus.downloading) ...[
-          const SizedBox(height: 12),
-          LinearProgressIndicator(
-            value: packages.progress,
-            semanticsLabel: 'Downloading update',
-            semanticsValue:
-                '${((packages.progress ?? 0) * 100).floor()}% downloaded',
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Update download',
+            style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
-          Semantics(
-            liveRegion: true,
-            child: Text(
-              '${_formatBytes(packages.received)} of ${_formatBytes(asset.size)} downloaded '
-              '(${((packages.progress ?? 0) * 100).floor()}%)',
-            ),
+          Text(
+            '${(asset.size / (1024 * 1024)).toStringAsFixed(1)} MB • SHA-256 checked',
           ),
-        ],
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            FilledButton.icon(
-              onPressed: packages.busy ? null : () => _download(context, asset),
-              icon: const Icon(Icons.download_outlined),
-              label: Text(ready ? 'Download again' : 'Download update'),
-            ),
-            if (packages.status == PackageStatus.downloading)
-              OutlinedButton(
-                onPressed: packages.cancel,
-                child: const Text('Cancel download'),
-              ),
-            if (ready || (current && packages.status == PackageStatus.opening))
-              OutlinedButton.icon(
-                onPressed: packages.busy ? null : packages.open,
-                icon: const Icon(Icons.install_desktop_outlined),
-                label: Text(
-                  packages.status == PackageStatus.opening
-                      ? 'Opening package...'
-                      : 'Open downloaded update',
-                ),
-              ),
+          if (current && packages.message != null) ...[
+            const SizedBox(height: 8),
+            Semantics(liveRegion: true, child: Text(packages.message!)),
           ],
-        ),
-      ],
+          if (current && packages.status == PackageStatus.downloading) ...[
+            const SizedBox(height: 12),
+            LinearProgressIndicator(
+              value: packages.progress,
+              semanticsLabel: 'Downloading update',
+              semanticsValue:
+                  '${((packages.progress ?? 0) * 100).floor()}% downloaded',
+            ),
+            const SizedBox(height: 8),
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                '${_formatBytes(packages.received)} of ${_formatBytes(asset.size)} downloaded '
+                '(${((packages.progress ?? 0) * 100).floor()}%)',
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              FilledButton.icon(
+                onPressed: packages.busy
+                    ? null
+                    : () => _download(context, asset),
+                icon: const Icon(Icons.download_outlined),
+                label: Text(ready ? 'Download again' : 'Download update'),
+              ),
+              if (packages.status == PackageStatus.downloading)
+                OutlinedButton(
+                  onPressed: packages.cancel,
+                  child: const Text('Cancel download'),
+                ),
+              if (ready ||
+                  (current && packages.status == PackageStatus.opening))
+                OutlinedButton.icon(
+                  onPressed: packages.busy ? null : packages.open,
+                  icon: const Icon(Icons.install_desktop_outlined),
+                  label: Text(
+                    packages.status == PackageStatus.opening
+                        ? 'Opening package...'
+                        : 'Open downloaded update',
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

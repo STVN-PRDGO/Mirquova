@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mirquova/adapters/pairing_identity.dart';
 
 class _MemorySecretStore implements PairingSecretStore {
@@ -61,6 +62,25 @@ class _FakeIdentityApi implements PairingIdentityApi {
 }
 
 void main() {
+  test('macOS pairing storage avoids provisioned Keychain Sharing', () {
+    final storage = FlutterPairingSecretStore.storageForPlatform(isMacOS: true);
+    expect(
+      (storage.mOptions as MacOsOptions).usesDataProtectionKeychain,
+      isFalse,
+    );
+    expect(storage.mOptions.groupId, isNull);
+  });
+
+  test('other platforms retain the secure-storage defaults', () {
+    final storage = FlutterPairingSecretStore.storageForPlatform(
+      isMacOS: false,
+    );
+    expect(
+      (storage.mOptions as MacOsOptions).usesDataProtectionKeychain,
+      isTrue,
+    );
+  });
+
   test(
     'creates once and stores identity material as one protected record',
     () async {
