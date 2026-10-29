@@ -5,6 +5,9 @@ from pathlib import Path
 import re
 import sys
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 def escape_workflow_command(value: str) -> str:
     return (
@@ -18,7 +21,7 @@ def escape_workflow_command(value: str) -> str:
 
 log_path, summary_path = map(Path, sys.argv[1:3])
 platform = sys.argv[3] if len(sys.argv) > 3 else "Flutter"
-lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+lines = log_path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
 lines = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in lines]
 failed = []
 failure_details = []
@@ -63,11 +66,6 @@ for message in failed:
 if diagnostics:
     summary.extend(["", "### Failure details", ""])
     summary.extend(f"- {line[:500]}" for line in diagnostics[:30])
-    for line in diagnostics[:30]:
-        print(
-            f"::error title={platform} test diagnostic::"
-            f"{escape_workflow_command(line[:500])}"
-        )
 for message, context in failure_details[:10]:
     detail = f"{message}\n{context}"[:3000]
     print(
@@ -78,19 +76,18 @@ for message, context in failure_details[:10]:
 if tail:
     summary.extend(["", "### Final test output", ""])
     summary.extend(f"- {line[:500]}" for line in tail)
-    for line in tail:
-        print(
-            f"::error title={platform} test output::"
-            f"{escape_workflow_command(line[:500])}"
-        )
+    excerpt = "\n".join(tail[-6:])[:3000]
+    print(
+        f"::error title={platform} final test output::"
+        f"{escape_workflow_command(excerpt)}"
+    )
 if native_markers:
     summary.extend(["", "### Native smoke progress", ""])
     summary.extend(f"- {line[:500]}" for line in native_markers[-5:])
-    for line in native_markers[-5:]:
-        print(
-            f"::notice title={platform} smoke progress::"
-            f"{escape_workflow_command(line[:500])}"
-        )
+    print(
+        f"::notice title={platform} smoke progress::"
+        f"{escape_workflow_command(native_markers[-1][:500])}"
+    )
 summary.append("")
 with summary_path.open("a", encoding="utf-8") as summary_file:
     summary_file.write("\n".join(summary))

@@ -234,9 +234,7 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
             ),
           ),
           const SizedBox(height: 12),
-          const Text(
-            'Download the update here, then open the package to finish with your system. Desktop previews require closing Mirquova and replacing the complete app bundle. Android requires system installation approval.',
-          ),
+          Text(_installationHint(widget.packages.platform.packageName)),
         ],
         const SizedBox(height: 20),
         Wrap(
@@ -328,6 +326,13 @@ class _PackagePanel extends StatelessWidget {
   final UpdateRelease release;
   final PackageUpdates packages;
 
+  String _formatBytes(int value) {
+    if (value < 1024 * 1024) {
+      return '${(value / 1024).toStringAsFixed(0)} KB';
+    }
+    return '${(value / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
   Future<void> _download(BuildContext context, UpdateAsset asset) async {
     final allowed = await showDialog<bool>(
       context: context,
@@ -380,9 +385,17 @@ class _PackagePanel extends StatelessWidget {
           LinearProgressIndicator(
             value: packages.progress,
             semanticsLabel: 'Downloading update',
+            semanticsValue:
+                '${((packages.progress ?? 0) * 100).floor()}% downloaded',
           ),
           const SizedBox(height: 8),
-          Text('${((packages.progress ?? 0) * 100).floor()}% downloaded'),
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              '${_formatBytes(packages.received)} of ${_formatBytes(asset.size)} downloaded '
+              '(${((packages.progress ?? 0) * 100).floor()}%)',
+            ),
+          ),
         ],
         const SizedBox(height: 12),
         Wrap(
@@ -414,4 +427,17 @@ class _PackagePanel extends StatelessWidget {
       ],
     );
   }
+}
+
+String _installationHint(String? packageName) {
+  if (packageName?.endsWith('.apk') ?? false) {
+    return 'After the download finishes, open the APK and approve the installation in Android. If Android asks for permission, allow installs for Mirquova and open the package again.';
+  }
+  if (packageName?.endsWith('.zip') ?? false) {
+    return 'After the download finishes, open the ZIP in your system archive app. Close Mirquova, then replace the complete app bundle with the extracted copy.';
+  }
+  if (packageName?.endsWith('.tar.gz') ?? false) {
+    return 'After the download finishes, open the archive with your system archive app. Close Mirquova, then replace the complete app bundle with the extracted copy.';
+  }
+  return 'After the download finishes, open the package with your system. Follow its installation steps to complete the update.';
 }

@@ -26,6 +26,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 const MAX_PAIRING_MESSAGE_BYTES: usize = 2048;
 const MAX_MUTUAL_AUTH_ATTEMPTS: u8 = 5;
+const PAIRING_PROTOCOL_VERSION: u16 = 1;
 const IO_TIMEOUT: Duration = Duration::from_secs(3);
 const ACCEPT_POLL: Duration = Duration::from_millis(100);
 
@@ -282,12 +283,16 @@ pub enum PairingTransportError {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BootstrapRequest {
+    protocol_version: u16,
+    role: PairingRole,
     secret: String,
     identity_ca_certificate_der_hex: String,
 }
 
 #[derive(Serialize)]
 struct BootstrapRequestRef<'a> {
+    protocol_version: u16,
+    role: PairingRole,
     secret: &'a str,
     identity_ca_certificate_der_hex: String,
 }
@@ -295,22 +300,37 @@ struct BootstrapRequestRef<'a> {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PairingProof {
+    protocol_version: u16,
+    role: PairingRole,
     alias: String,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PairingResponse {
+    protocol_version: u16,
+    role: PairingRole,
     status: ResponseStatus,
     peer_alias: Option<String>,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+enum PairingRole {
+    Joiner,
+    Host,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 enum ResponseStatus {
     Continue,
     Accepted,
     Rejected,
+}
+
+fn message_matches_protocol(version: u16, role: PairingRole, expected: PairingRole) -> bool {
+    version == PAIRING_PROTOCOL_VERSION && role == expected
 }
 
 fn host_worker(
@@ -374,7 +394,15 @@ fn host_worker(
         let proof: PairingProof = match read_frame(&mut stream)
             .and_then(|bytes| serde_json::from_slice::<PairingProof>(&bytes).map_err(invalid_data))
         {
-            Ok(proof) if valid_alias(&proof.alias) => proof,
+            Ok(proof)
+                if message_matches_protocol(
+                    proof.protocol_version,
+                    proof.role,
+                    PairingRole::Joiner,
+                ) && valid_alias(&proof.alias) =>
+            {
+                proof
+            }
             _ => continue,
         };
         authenticated_peer = Some((stream, proof));
@@ -406,6 +434,8 @@ fn host_worker(
             if write_frame(
                 &mut stream,
                 &PairingResponse {
+                    protocol_version: PAIRING_PROTOCOL_VERSION,
+                    role: PairingRole::Host,
                     status: ResponseStatus::Accepted,
                     peer_alias: Some(host_alias.to_owned()),
                 },
@@ -420,6 +450,8 @@ fn host_worker(
             let _ = write_frame(
                 &mut stream,
                 &PairingResponse {
+                    protocol_version: PAIRING_PROTOCOL_VERSION,
+                    role: PairingRole::Host,
                     status: ResponseStatus::Rejected,
                     peer_alias: None,
                 },
@@ -436,6 +468,8 @@ fn host_worker(
             let _ = write_frame(
                 &mut stream,
                 &PairingResponse {
+                    protocol_version: PAIRING_PROTOCOL_VERSION,
+                    role: PairingRole::Host,
                     status: ResponseStatus::Rejected,
                     peer_alias: None,
                 },
@@ -468,6 +502,10 @@ fn accept_bootstrap(
         Ok(request) => request,
         Err(_) => return Err(charge_failed_attempt(invitation)),
     };
+    if !message_matches_protocol(request.protocol_version, request.role, PairingRole::Joiner) {
+        request.secret.zeroize();
+        return Err(charge_failed_attempt(invitation));
+    }
     let certificate = match decode_hex(&request.identity_ca_certificate_der_hex, 512) {
         Some(certificate) => certificate,
         None => {
@@ -491,6 +529,8 @@ fn accept_bootstrap(
             let _ = write_frame(
                 &mut stream,
                 &PairingResponse {
+                    protocol_version: PAIRING_PROTOCOL_VERSION,
+                    role: PairingRole::Host,
                     status: ResponseStatus::Rejected,
                     peer_alias: None,
                 },
@@ -501,6 +541,8 @@ fn accept_bootstrap(
     write_frame(
         &mut stream,
         &PairingResponse {
+            protocol_version: PAIRING_PROTOCOL_VERSION,
+            role: PairingRole::Host,
             status: ResponseStatus::Continue,
             peer_alias: Some(host_alias.to_owned()),
         },
@@ -550,6 +592,8 @@ fn join_worker(
     };
     let secret = zeroize::Zeroizing::new(invitation.secret_hex());
     let request = BootstrapRequestRef {
+        protocol_version: PAIRING_PROTOCOL_VERSION,
+        role: PairingRole::Joiner,
         secret: &secret,
         identity_ca_certificate_der_hex: encode_hex(identity.certificate_der()),
     };
@@ -562,6 +606,9 @@ fn join_worker(
         Ok(response) => response,
         Err(_) => return fail(&state, "invalid_response"),
     };
+    if !message_matches_protocol(response.protocol_version, response.role, PairingRole::Host) {
+        return fail(&state, "protocol_mismatch");
+    }
     if response.status != ResponseStatus::Continue {
         return fail(&state, "invitation_rejected");
     }
@@ -588,6 +635,8 @@ fn join_worker(
     if write_frame(
         &mut stream,
         &PairingProof {
+            protocol_version: PAIRING_PROTOCOL_VERSION,
+            role: PairingRole::Joiner,
             alias: alias.to_owned(),
         },
     )
@@ -601,6 +650,9 @@ fn join_worker(
         Ok(response) => response,
         Err(_) => return fail(&state, "network"),
     };
+    if !message_matches_protocol(response.protocol_version, response.role, PairingRole::Host) {
+        return fail(&state, "protocol_mismatch");
+    }
     match response.status {
         ResponseStatus::Accepted => state.set(PairingSnapshot {
             status: PairingStatus::Paired,
@@ -839,6 +891,35 @@ mod tests {
     static TRANSPORT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
+    fn pairing_messages_require_supported_version_and_expected_role() {
+        assert!(message_matches_protocol(
+            PAIRING_PROTOCOL_VERSION,
+            PairingRole::Joiner,
+            PairingRole::Joiner,
+        ));
+        assert!(message_matches_protocol(
+            PAIRING_PROTOCOL_VERSION,
+            PairingRole::Host,
+            PairingRole::Host,
+        ));
+        assert!(!message_matches_protocol(
+            PAIRING_PROTOCOL_VERSION + 1,
+            PairingRole::Joiner,
+            PairingRole::Joiner,
+        ));
+        assert!(!message_matches_protocol(
+            PAIRING_PROTOCOL_VERSION,
+            PairingRole::Host,
+            PairingRole::Joiner,
+        ));
+        assert!(!message_matches_protocol(
+            PAIRING_PROTOCOL_VERSION,
+            PairingRole::Joiner,
+            PairingRole::Host,
+        ));
+    }
+
+    #[test]
     fn cancelled_connect_returns_before_opening_a_socket() {
         let cancel = AtomicBool::new(true);
         let address = "192.168.1.1:1".parse().unwrap();
@@ -914,6 +995,10 @@ mod tests {
             Duration::from_secs(30),
         )
         .expect("bind a pairing listener to the selected private interface");
+
+        reject_incompatible_bootstrap(&host, PAIRING_PROTOCOL_VERSION + 1, PairingRole::Joiner);
+        reject_incompatible_bootstrap(&host, PAIRING_PROTOCOL_VERSION, PairingRole::Host);
+        assert_eq!(host.snapshot().status, PairingStatus::WaitingForPeer);
 
         // A modified bearer secret is rejected through the TLS bootstrap while
         // leaving the invitation available for a legitimate single use.
@@ -1001,6 +1086,26 @@ mod tests {
 
         drop(joining);
         drop(host);
+    }
+
+    fn reject_incompatible_bootstrap(host: &HostSession, version: u16, role: PairingRole) {
+        let invitation = PairingInvitation::parse(host.payload().as_bytes()).unwrap();
+        let identity = PairingIdentity::generate().unwrap();
+        let config =
+            PairingIdentity::bootstrap_client_config(invitation.identity_ca_certificate_der())
+                .unwrap();
+        let socket = TcpStream::connect_timeout(&host.endpoint().into(), IO_TIMEOUT).unwrap();
+        configure_socket(&socket).unwrap();
+        let mut stream = client_stream(socket, config).unwrap();
+        let secret = Zeroizing::new(invitation.secret_hex());
+        let request = BootstrapRequestRef {
+            protocol_version: version,
+            role,
+            secret: &secret,
+            identity_ca_certificate_der_hex: encode_hex(identity.certificate_der()),
+        };
+        write_sensitive_frame(&mut stream, &request).unwrap();
+        assert!(read_frame(&mut stream).is_err());
     }
 
     fn exercise_competing_joiners() {
@@ -1151,6 +1256,201 @@ mod tests {
         drop(replacement_host);
     }
 
+    fn exercise_mutual_protocol_rejection() {
+        let _serial = TRANSPORT_TEST_LOCK.lock().unwrap();
+        let Some(address) = private_interface_address() else {
+            eprintln!("skipping same-host pairing transport: no connectable RFC1918 interface");
+            return;
+        };
+        let host_identity = PairingIdentity::generate().unwrap();
+        let host_certificate = host_identity.certificate_der().to_vec();
+        let joining_identity = PairingIdentity::generate().unwrap();
+        let joining_certificate = joining_identity.certificate_der().to_vec();
+        let host = HostSession::start(
+            address,
+            0,
+            host_identity,
+            "Host device",
+            Duration::from_secs(30),
+        )
+        .unwrap();
+        let invitation = PairingInvitation::parse(host.payload().as_bytes()).unwrap();
+
+        let bootstrap_config =
+            PairingIdentity::bootstrap_client_config(invitation.identity_ca_certificate_der())
+                .unwrap();
+        let socket = TcpStream::connect_timeout(&invitation.endpoint().into(), IO_TIMEOUT).unwrap();
+        configure_socket(&socket).unwrap();
+        let mut bootstrap = client_stream(socket, bootstrap_config).unwrap();
+        let secret = Zeroizing::new(invitation.secret_hex());
+        let request = BootstrapRequestRef {
+            protocol_version: PAIRING_PROTOCOL_VERSION,
+            role: PairingRole::Joiner,
+            secret: &secret,
+            identity_ca_certificate_der_hex: encode_hex(&joining_certificate),
+        };
+        write_sensitive_frame(&mut bootstrap, &request).unwrap();
+        let response: PairingResponse =
+            serde_json::from_slice(&read_frame(&mut bootstrap).unwrap()).unwrap();
+        assert!(message_matches_protocol(
+            response.protocol_version,
+            response.role,
+            PairingRole::Host,
+        ));
+        assert_eq!(response.status, ResponseStatus::Continue);
+        drop(bootstrap);
+
+        for (version, role) in [
+            (PAIRING_PROTOCOL_VERSION + 1, PairingRole::Joiner),
+            (PAIRING_PROTOCOL_VERSION, PairingRole::Host),
+        ] {
+            let config = joining_identity
+                .mutual_client_config(&host_certificate)
+                .unwrap();
+            let socket =
+                TcpStream::connect_timeout(&invitation.endpoint().into(), IO_TIMEOUT).unwrap();
+            configure_socket(&socket).unwrap();
+            let mut stream = client_stream(socket, config).unwrap();
+            write_frame(
+                &mut stream,
+                &PairingProof {
+                    protocol_version: version,
+                    role,
+                    alias: "Joining phone".to_owned(),
+                },
+            )
+            .unwrap();
+            assert!(read_frame(&mut stream).is_err());
+        }
+        assert_eq!(host.snapshot().status, PairingStatus::WaitingForPeer);
+
+        let config = joining_identity
+            .mutual_client_config(&host_certificate)
+            .unwrap();
+        let socket = TcpStream::connect_timeout(&invitation.endpoint().into(), IO_TIMEOUT).unwrap();
+        configure_socket(&socket).unwrap();
+        let mut stream = client_stream(socket, config).unwrap();
+        write_frame(
+            &mut stream,
+            &PairingProof {
+                protocol_version: PAIRING_PROTOCOL_VERSION,
+                role: PairingRole::Joiner,
+                alias: "Joining phone".to_owned(),
+            },
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while host.snapshot().status != PairingStatus::AwaitingApproval && Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(host.snapshot().status, PairingStatus::AwaitingApproval);
+        assert!(host.approve());
+        let response: PairingResponse =
+            serde_json::from_slice(&read_frame(&mut stream).unwrap()).unwrap();
+        assert!(message_matches_protocol(
+            response.protocol_version,
+            response.role,
+            PairingRole::Host,
+        ));
+        assert_eq!(response.status, ResponseStatus::Accepted);
+        assert_eq!(host.snapshot().status, PairingStatus::Paired);
+        drop(stream);
+        drop(host);
+    }
+
+    fn exercise_joiner_rejects_mismatched_host_response(version: u16, role: PairingRole) {
+        let _serial = TRANSPORT_TEST_LOCK.lock().unwrap();
+        let Some(address) = private_interface_address() else {
+            eprintln!("skipping same-host pairing transport: no connectable RFC1918 interface");
+            return;
+        };
+        let listener = TcpListener::bind(SocketAddrV4::new(address, 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = match listener.local_addr().unwrap() {
+            std::net::SocketAddr::V4(endpoint) => endpoint,
+            _ => unreachable!(),
+        };
+        let host_identity = PairingIdentity::generate().unwrap();
+        let host_certificate = host_identity.certificate_der().to_vec();
+        let joining_identity = PairingIdentity::generate().unwrap();
+        let joining_certificate = joining_identity.certificate_der().to_vec();
+        let generated =
+            PairingInvitation::generate(endpoint, &host_certificate, Duration::from_secs(30))
+                .unwrap();
+        let fingerprint = digest(&SHA256, &host_certificate);
+        let (payload, mut invitation) = generated.into_parts();
+
+        let server = thread::spawn(move || {
+            let cancel = AtomicBool::new(false);
+            let deadline = Instant::now() + Duration::from_secs(15);
+            let socket = accept_until(&listener, deadline, &cancel).unwrap();
+            let config = host_identity.bootstrap_server_config().unwrap();
+            let mut stream = server_stream(socket, config).unwrap();
+            let mut bytes = read_frame(&mut stream).unwrap();
+            let mut request = serde_json::from_slice::<BootstrapRequest>(&bytes).unwrap();
+            bytes.zeroize();
+            assert!(message_matches_protocol(
+                request.protocol_version,
+                request.role,
+                PairingRole::Joiner,
+            ));
+            let candidate_ca = decode_hex(&request.identity_ca_certificate_der_hex, 512).unwrap();
+            assert_eq!(candidate_ca, joining_certificate);
+            invitation.consume_secret_hex(&request.secret).unwrap();
+            request.secret.zeroize();
+            write_frame(
+                &mut stream,
+                &PairingResponse {
+                    protocol_version: PAIRING_PROTOCOL_VERSION,
+                    role: PairingRole::Host,
+                    status: ResponseStatus::Continue,
+                    peer_alias: Some("Host device".to_owned()),
+                },
+            )
+            .unwrap();
+            drop(stream);
+
+            let socket = accept_until(&listener, deadline, &cancel).unwrap();
+            let config = host_identity.mutual_server_config(&candidate_ca).unwrap();
+            let mut stream = server_stream(socket, config).unwrap();
+            let proof: PairingProof =
+                serde_json::from_slice(&read_frame(&mut stream).unwrap()).unwrap();
+            assert!(message_matches_protocol(
+                proof.protocol_version,
+                proof.role,
+                PairingRole::Joiner,
+            ));
+            write_frame(
+                &mut stream,
+                &PairingResponse {
+                    protocol_version: version,
+                    role,
+                    status: ResponseStatus::Accepted,
+                    peer_alias: Some("Host device".to_owned()),
+                },
+            )
+            .unwrap();
+        });
+
+        let joining = JoinSession::start(
+            payload.as_bytes(),
+            fingerprint.as_ref().try_into().unwrap(),
+            joining_identity,
+            "Joining phone",
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while joining.snapshot().status != PairingStatus::Error && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(joining.snapshot().status, PairingStatus::Error);
+        assert_eq!(joining.snapshot().error_code, Some("protocol_mismatch"));
+        assert_eq!(joining.snapshot().peer_ca_certificate_der_hex, None);
+        drop(joining);
+        server.join().unwrap();
+    }
+
     #[test]
     fn join_rejects_a_wrong_fingerprint_before_opening_a_connection() {
         let identity = PairingIdentity::generate().unwrap();
@@ -1197,5 +1497,29 @@ mod tests {
     #[ignore = "explicit same-host private-interface TLS transport run; not physical-device validation"]
     fn local_private_interface_pairing_restart_invalidates_old_invitation() {
         exercise_restart_invalidates_invitation();
+    }
+
+    #[test]
+    #[ignore = "explicit same-host private-interface TLS transport run; not physical-device validation"]
+    fn local_private_interface_pairing_rejects_mutual_protocol_mismatch() {
+        exercise_mutual_protocol_rejection();
+    }
+
+    #[test]
+    #[ignore = "explicit same-host private-interface TLS transport run; not physical-device validation"]
+    fn local_private_interface_joiner_rejects_mismatched_host_version() {
+        exercise_joiner_rejects_mismatched_host_response(
+            PAIRING_PROTOCOL_VERSION + 1,
+            PairingRole::Host,
+        );
+    }
+
+    #[test]
+    #[ignore = "explicit same-host private-interface TLS transport run; not physical-device validation"]
+    fn local_private_interface_joiner_rejects_mismatched_host_role() {
+        exercise_joiner_rejects_mismatched_host_response(
+            PAIRING_PROTOCOL_VERSION,
+            PairingRole::Joiner,
+        );
     }
 }

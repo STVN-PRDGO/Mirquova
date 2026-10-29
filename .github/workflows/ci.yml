@@ -96,7 +96,7 @@ jobs:
           api-level: 35
           target: google_apis
           arch: x86_64
-          script: cd apps/mirquova_flutter && python3 "$GITHUB_WORKSPACE/scripts/run_logged_flutter_smoke.py" "$RUNNER_TEMP/android-native-smoke.log" "$GITHUB_STEP_SUMMARY" "Android emulator" timeout 300s flutter test integration_test/native_app_platform_test.dart -d emulator-5554 --no-pub --reporter expanded --verbose
+          script: cd apps/mirquova_flutter && python3 "$GITHUB_WORKSPACE/scripts/run_logged_flutter_smoke.py" "$RUNNER_TEMP/android-native-smoke.log" "$GITHUB_STEP_SUMMARY" "Android emulator" 300 flutter test integration_test/native_app_platform_test.dart -d emulator-5554 --no-pub --reporter expanded --verbose
       - name: Upload Android native smoke log
         if: failure()
         uses: actions/upload-artifact@v4
@@ -123,6 +123,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Test bounded native smoke runner
+        run: python3 scripts/test_run_logged_flutter_smoke.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: '1.99.1'
@@ -210,7 +212,14 @@ jobs:
         name: macOS native bridge, keychain and Pair route smoke test
         shell: bash
         working-directory: apps/mirquova_flutter
-        run: python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' flutter --suppress-analytics --no-version-check test integration_test/native_app_platform_test.dart -d macos --no-pub --verbose
+        run: python3 "$GITHUB_WORKSPACE/scripts/run_logged_flutter_smoke.py" "$RUNNER_TEMP/macos-native-smoke.log" "$GITHUB_STEP_SUMMARY" "macOS" 300 flutter --suppress-analytics --no-version-check test integration_test/native_app_platform_test.dart -d macos --no-pub --verbose
+      - name: Upload macOS native smoke log
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-native-smoke-log
+          path: ${{ runner.temp }}/macos-native-smoke.log
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ runner.os }}-preview
@@ -256,13 +265,7 @@ jobs:
           SIMULATOR_ID: ${{ steps.ios-simulator.outputs.id }}
         run: |
           echo "Starting native iOS pairing smoke test on $SIMULATOR_ID"
-          set -o pipefail
-          if python3 -c 'import subprocess,sys; subprocess.run(sys.argv[1:], check=True, timeout=300)' flutter test integration_test/native_app_platform_test.dart -d "$SIMULATOR_ID" --no-pub --verbose --reporter expanded 2>&1 | tee "$RUNNER_TEMP/ios-native-smoke.log"; then
-            echo "Native iOS pairing smoke test passed."
-          else
-            python3 "$GITHUB_WORKSPACE/scripts/report_flutter_test_failures.py" "$RUNNER_TEMP/ios-native-smoke.log" "$GITHUB_STEP_SUMMARY" "iOS simulator"
-            exit 1
-          fi
+          python3 "$GITHUB_WORKSPACE/scripts/run_logged_flutter_smoke.py" "$RUNNER_TEMP/ios-native-smoke.log" "$GITHUB_STEP_SUMMARY" "iOS simulator" 300 flutter test integration_test/native_app_platform_test.dart -d "$SIMULATOR_ID" --no-pub --verbose --reporter expanded
       - name: Upload iOS native smoke log
         if: failure()
         uses: actions/upload-artifact@v4

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -34,6 +35,14 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
   Future<List<TrustedPeer>>? _trustedList;
   Timer? _invitationExpiry;
   Timer? _joinInvitationExpiry;
+
+  bool get _qrScannerAvailable =>
+      !kIsWeb &&
+      const {
+        TargetPlatform.android,
+        TargetPlatform.iOS,
+        TargetPlatform.macOS,
+      }.contains(defaultTargetPlatform);
 
   @override
   void initState() {
@@ -372,9 +381,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
             ),
           ),
           const SizedBox(height: 12),
-          if ((Platform.isAndroid || Platform.isIOS || Platform.isMacOS) &&
-              _invitation == null &&
-              !_scannerOpen)
+          if (_qrScannerAvailable && _invitation == null && !_scannerOpen)
             OutlinedButton.icon(
               onPressed: () => setState(() => _scannerOpen = true),
               icon: const Icon(Icons.camera_alt_outlined),

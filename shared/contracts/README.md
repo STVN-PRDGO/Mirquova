@@ -13,3 +13,7 @@ mq_discovery_snapshot returns owned NUL-terminated UTF-8 JSON. Free exactly once
 The Android multicast lock is shared by pending/active scan and visibility operations. Calls are serialized and demand is re-evaluated before acquire/release so one operation cannot release another operation's lock. Stop/dispose invalidates pending starts. App hidden/paused/detached stops both activities, and visibility never resumes automatically.
 
 Manual IP/port entries are separate session-only candidates. They are not contacted, authenticated or used to bypass this presence-only contract. QR, IPv6, identity persistence, authenticated pairing, transfer and casting are not implemented. See docs/pairing-design-review.md for the proposed next stage.
+
+## Later pairing implementation
+
+The statement above records the original discovery/presence contract's scope. The subsequent authenticated pairing implementation has a separate versioned message contract in [pairing-protocol.md](pairing-protocol.md); it does not change the discovery ABI or authenticate discovery candidates.

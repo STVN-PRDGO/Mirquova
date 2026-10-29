@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Discover Mirquova devices on your local network when you choose Scan nearby or Make discoverable.</string>
+	<string>Use your local network to find Mirquova devices and connect directly when you choose to pair with an invitation.</string>
 	<key>NSBonjourServices</key>
 	<array><string>_mirq-presence._tcp</string></array>
 	<key>NSCameraUsageDescription</key>

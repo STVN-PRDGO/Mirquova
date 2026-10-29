@@ -9,12 +9,28 @@ import 'package:mirquova/core/pairing_invitation.dart';
 
 class _Store implements PairingSecretStore {
   final values = <String, String>{};
+  int writes = 0;
   @override
   Future<String?> read(String key) async => values[key];
   @override
-  Future<void> write(String key, String value) async => values[key] = value;
+  Future<void> write(String key, String value) async {
+    writes++;
+    values[key] = value;
+  }
+
   @override
   Future<void> delete(String key) async => values.remove(key);
+}
+
+class _FailingWriteStore extends _Store {
+  bool failWrites = true;
+
+  @override
+  Future<void> write(String key, String value) async {
+    writes++;
+    if (failWrites) throw StateError('Secure storage is unavailable.');
+    values[key] = value;
+  }
 }
 
 class _DelayedReadStore extends _Store {
@@ -214,6 +230,43 @@ void main() {
       jsonDecode(store.values['mirquova.pairing.trusted_peers.v1']!),
       isA<List>(),
     );
+    expect(store.writes, 1);
+    controller.approve();
+    await Future<void>.delayed(Duration.zero);
+    expect(store.writes, 1);
+    controller.dispose();
+  });
+
+  test('a failed trusted-peer save is visible and can be retried', () async {
+    final transport = _Transport()
+      ..value = PairingSnapshot(
+        status: PairingStatus.paired,
+        peerAlias: 'Phone',
+        peerCaCertificateDer: Uint8List.fromList([0x30, 0x01]),
+      );
+    final store = _FailingWriteStore();
+    final controller = PairingController(
+      identities: PairingIdentityRepository(api: _Identity(), store: store),
+      trustedPeers: PairingTrustRepository(store: store),
+      api: transport,
+    );
+
+    controller.approve();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.trustSaveFailed, isTrue);
+    expect(controller.savingTrust, isFalse);
+    expect(await PairingTrustRepository(store: store).list(), isEmpty);
+
+    store.failWrites = false;
+    controller.retryTrustSave();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.trustSaveFailed, isFalse);
+    expect(controller.savingTrust, isFalse);
+    expect(
+      (await PairingTrustRepository(store: store).list()).single.alias,
+      'Phone',
+    );
+    expect(store.writes, 2);
     controller.dispose();
   });
 }

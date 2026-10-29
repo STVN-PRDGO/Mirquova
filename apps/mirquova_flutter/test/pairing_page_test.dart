@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mirquova/adapters/pairing_identity.dart';
@@ -110,6 +112,7 @@ void main() {
   ) async {
     await tester.pumpWidget(page());
     await tester.pump();
+    await tester.ensureVisible(find.text('Create invitation'));
     await tester.tap(find.text('Create invitation'));
     await tester.pump();
     await tester.pump();
@@ -122,6 +125,19 @@ void main() {
     expect(find.text('Stop invitation'), findsOneWidget);
   });
 
+  testWidgets('macOS pairing offers its QR scanner entry point', (
+    tester,
+  ) async {
+    final originalPlatform = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      await tester.pumpWidget(page());
+      expect(find.text('Scan QR code'), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = originalPlatform;
+    }
+  });
+
   testWidgets('corrupt identity recovery requires a clear user confirmation', (
     tester,
   ) async {
@@ -130,12 +146,14 @@ void main() {
     await tester.pumpWidget(page());
     await tester.pump();
 
+    await tester.ensureVisible(find.text('Create invitation'));
     await tester.tap(find.text('Create invitation'));
     await tester.pump();
     await tester.pump();
     expect(find.text('Reset corrupt pairing identity'), findsOneWidget);
     expect(store.values[key], '{broken');
 
+    await tester.ensureVisible(find.text('Reset corrupt pairing identity'));
     await tester.tap(find.text('Reset corrupt pairing identity'));
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('Reset this device identity?'), findsOneWidget);
@@ -147,6 +165,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     expect(store.values[key], '{broken');
 
+    await tester.ensureVisible(find.text('Reset corrupt pairing identity'));
     await tester.tap(find.text('Reset corrupt pairing identity'));
     await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('Reset identity and continue'));
@@ -154,6 +173,7 @@ void main() {
     expect(store.values.containsKey(key), isFalse);
     expect(find.text('Reset corrupt pairing identity'), findsNothing);
 
+    await tester.ensureVisible(find.text('Create invitation'));
     await tester.tap(find.text('Create invitation'));
     await tester.pump();
     await tester.pump();
@@ -166,6 +186,7 @@ void main() {
   ) async {
     await tester.pumpWidget(page());
     await tester.pump();
+    await tester.ensureVisible(find.text('Create invitation'));
     await tester.tap(find.text('Create invitation'));
     await tester.pump();
     await tester.pump();
