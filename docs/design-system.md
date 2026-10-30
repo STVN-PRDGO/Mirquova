@@ -11,3 +11,18 @@ Primary controls are at least 48 logical pixels. Forms have labels and inline er
 Readable light/dark phone and desktop renders are in apps/mirquova_flutter/test/goldens. The tests load licensed SDK fonts rather than Ahem test placeholders. These are reference renders, not physical screenshots; The hosted macOS-15 CI renderer is the canonical CI profile for exact pixel comparisons (`MIRQUOVA_GOLDEN_PROFILE=macos-15`); the original developer-machine renders remain the default `local` profile. See `test/goldens/macos-15/README.md` for artifact provenance. CI runs those comparisons on macOS and the remaining layout/interaction tests on Windows and Linux. Only the four screenshot tests carry the `golden` tag; accessibility layout tests remain untagged. Cross-host raster differences require deliberate review, not a higher mismatch threshold. CI uploads failed comparisons for review.
 
 Preview 03 uses native Material consent/name entry and a visible Hide now control. The visibility status announces updates, and name errors use plain language. Widget tests exercise consent, cancellation and background cleanup; the actual Windows runner checks the flow.
+
+The 2026-10-30 pairing polish adds consistent icon-led section headers, quieter
+form borders, full-width invitation actions, a separated scan/paste choice and a
+visible fingerprint reminder. Errors use rounded containers, explicit error-text
+contrast and live-region semantics. These styles are scoped to Pair; Nearby's
+existing golden references were not regenerated. Nearby candidate copy now points
+to invitation pairing while keeping discovery claims explicitly unverified.
+
+Validation: Dart formatting and Flutter analysis passed; 138 non-golden tests
+passed with the native Rust library, including four Pair layout checks at phone
+and desktop widths with 2x text in light/dark themes. The ARM64 Android debug APK
+built and was installed in the local Pixel 10a emulator for visual inspection.
+Local screenshots are under `local-evidence/virtual-2026-10-30/` with the
+`android-pair-polished` prefix. No dependencies or pairing protocol changed in
+this UI pass; physical-device accessibility and camera checks remain pending.

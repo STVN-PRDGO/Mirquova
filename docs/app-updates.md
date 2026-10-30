@@ -42,6 +42,66 @@ Publish compatible packages to the stable release with GitHub-generated digests.
 
 ## Verification
 
+### Local update review — 2026-10-30
+
+The five focused offline suites (`app_updates`, `github_updates`,
+`package_updates`, `settings_updates`, and `native_app_platform`) passed all 68
+tests. They cover version comparison, no automatic requests, consent,
+cancellation/late results, bounded downloads, redirect restrictions, digest and
+size mismatches, tampering before handoff, errors/retry, and UI layouts. Flutter
+analysis passed.
+
+The new `integration_test/native_update_package_test.dart` passed on the local
+Pixel 10a ARM64 emulator (Android API 37, app target API 36). It read installed
+metadata and the actual native cache directory, then confirmed native rejection
+of an invalid APK, an unexpected filename, a noncanonical path and a missing
+file. Probe files were isolated and removed. No installer was launched, and no
+live GitHub metadata or packages were fetched. This complements the earlier
+native consent-cancellation smoke; it does not prove successful installation.
+
+The review found two release-pipeline gaps that prevent treating Android updates
+as verified end to end:
+
+- `.github/workflows/release.yml` builds the Android asset with `--debug` but
+  does not provision a stable signing key. A freshly generated runner debug key
+  need not match an installed local or previous-run APK; the native updater
+  correctly rejects a signature mismatch. A consistent signing identity must be
+  supplied and retained across published builds.
+- The workflow validates the release tag's syntax but does not check it against
+  `pubspec.yaml` or override the packaged version/build. For example, a `v0.4.0`
+  tag could advertise an update while packaging the current `0.3.0+3` app. An
+  installed Android build with version code 3 rejects another code-3 APK. Release
+  metadata must match package metadata, and Android version codes must increase.
+
+These are source-review findings, not observations about any particular
+published asset. Live release availability/digests, newer same-key installation,
+unknown-source permission approval, and desktop archive handoff remain untested
+in this review. The local UI and pairing edits are uncommitted and are not
+themselves a published update. Production signing, automatic desktop replacement
+and rollback remain outstanding.
+
+### One authorized live check — 2026-10-30
+
+After explicit user opt-in, exactly one GET to the configured latest-release
+endpoint returned HTTP 200, using the app's user agent, media type and API-version
+header. No redirect was followed and no asset was downloaded. GitHub confirmed
+API version `2026-03-10` in its response headers.
+
+The response identified [Mirquova Preview v0.3.4](https://github.com/STVN-PRDGO/Mirquova/releases/tag/v0.3.4),
+published `2026-10-27T17:45:09Z`, with `draft: false` and `prerelease: false`.
+The app's actual `GitHubUpdateSource.parseRelease` accepted the saved response in
+a local Flutter test; `AppVersion` correctly identified it as newer than the
+emulator's installed `0.3.0+3`. Compatible, unambiguous asset metadata with
+published SHA-256 digests was accepted for Android ARM64, macOS ARM64, Windows
+x64 and Linux x64.
+
+The Android asset was listed as 79,811,644 bytes with digest
+`9f22e5bb4ff0e9187146046a7830020bc48f3ea933d196894fed932327a0bfab`.
+This verifies release discovery and metadata selection against the live service;
+it does not verify package bytes, internal version code, signer compatibility or
+installation. The release-pipeline risks above remain unresolved. The response
+and headers are saved under ignored `local-evidence/update-check-2026-10-30/`.
+
 Automated checks use offline metadata fixtures and fake transports; they never call the live release API or open a browser. The Windows native integration test reads installed metadata, opens Settings, cancels the consent prompt with zero release requests, and verifies native rejection of invalid release URLs. Those checks do not establish live release availability, successful package installation, Android device behavior or TV support.
 
 Local verification on 2026-10-27:

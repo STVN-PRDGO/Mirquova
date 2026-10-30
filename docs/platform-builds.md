@@ -1,5 +1,10 @@
 # Platform expansion evidence
 
+Latest local follow-up: [2026-10-30 virtual testing](virtual-testing-2026-10-30.md)
+passed the Android ARM64 emulator native storage/FFI/Pair smoke and normal app
+launch. The same session exposed unresolved Mac private-interface TLS test
+failures. Older host-specific results below remain historical.
+
 Recorded on 2026-10-27 for source version 0.3.0+3. Historical Windows/Android results remain in iteration-02.md and iteration-03.md. This record covers the earlier platform expansion; authenticated pairing has since been added. Transfers, casting and playback remain unavailable.
 
 ## Implementation
