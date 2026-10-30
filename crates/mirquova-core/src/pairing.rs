@@ -114,6 +114,33 @@ impl PairingIdentity {
         Ok(Arc::new(config))
     }
 
+    /// Trusts only the supplied peer CAs. An empty list does not mean "trust anyone".
+    pub fn mutual_server_config_for_trusted_peers(
+        &self,
+        peer_ca_certificates_der: &[impl AsRef<[u8]>],
+    ) -> Result<Arc<ServerConfig>, PairingCryptoError> {
+        if peer_ca_certificates_der.is_empty() || peer_ca_certificates_der.len() > 32 {
+            return Err(PairingCryptoError::TlsConfiguration);
+        }
+        let mut roots = RootCertStore::empty();
+        for certificate in peer_ca_certificates_der {
+            let certificate = certificate.as_ref();
+            validate_ca(certificate)?;
+            roots
+                .add(CertificateDer::from(certificate.to_vec()))
+                .map_err(|_| PairingCryptoError::InvalidIdentityCertificate)?;
+        }
+        let verifier = WebPkiClientVerifier::builder(Arc::new(roots))
+            .build()
+            .map_err(|_| PairingCryptoError::TlsConfiguration)?;
+        let (certificate, key) = self.issue_leaf(true)?;
+        let config = tls13_server_builder()
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(certificate, key)
+            .map_err(|_| PairingCryptoError::TlsConfiguration)?;
+        Ok(Arc::new(config))
+    }
+
     pub fn mutual_client_config(
         &self,
         peer_ca_certificate_der: &[u8],

@@ -373,7 +373,9 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
                 _hostInvitationCopied ? Icons.check : Icons.copy_outlined,
               ),
               label: Text(
-                _hostInvitationCopied ? 'Copy invitation again' : 'Copy invitation',
+                _hostInvitationCopied
+                    ? 'Copy invitation again'
+                    : 'Copy invitation',
               ),
             ),
             const SizedBox(height: 8),

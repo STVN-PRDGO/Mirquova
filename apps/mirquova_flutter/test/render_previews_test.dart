@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mirquova/app.dart';
@@ -95,6 +96,13 @@ void main() {
     await tester.pumpWidget(MirquovaApp(discovery: _IdleDiscovery()));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    await tester.tap(find.byTooltip('Open navigation menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: find.byType(Drawer), matching: find.text('Devices')),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Add LAN address'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

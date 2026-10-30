@@ -118,8 +118,12 @@ void main() {
     if (find.byTooltip('Open navigation menu').evaluate().isNotEmpty) {
       await tester.tap(find.byTooltip('Open navigation menu'));
       await tester.pumpAndSettle();
+      final settings = find.descendant(
+        of: find.byType(Drawer),
+        matching: find.text('Settings'),
+      );
       await tester.scrollUntilVisible(
-        find.text('Settings'),
+        settings,
         200,
         scrollable: find
             .descendant(
@@ -128,10 +132,11 @@ void main() {
             )
             .first,
       );
+      await tester.tap(settings);
+    } else {
+      await tester.ensureVisible(find.text('Settings').first);
+      await tester.tap(find.text('Settings').first);
     }
-    await tester.ensureVisible(find.text('Settings').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Settings').first);
     await tester.pumpAndSettle();
   }
 

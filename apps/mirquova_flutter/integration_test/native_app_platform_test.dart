@@ -203,9 +203,16 @@ void main() {
     if (find.byTooltip('Open navigation menu').evaluate().isNotEmpty) {
       await tester.tap(find.byTooltip('Open navigation menu'));
       await _settle(tester);
+      await tester.ensureVisible(
+        find.descendant(of: find.byType(Drawer), matching: find.text('Pair')),
+      );
+      await tester.tap(
+        find.descendant(of: find.byType(Drawer), matching: find.text('Pair')),
+      );
+    } else {
+      await tester.ensureVisible(find.text('Pair').first);
+      await tester.tap(find.text('Pair').first);
     }
-    await tester.ensureVisible(find.text('Pair').first);
-    await tester.tap(find.text('Pair').first);
     await _settle(tester);
     expect(find.text('Pair devices'), findsOneWidget);
     expect(find.text('Invitation text'), findsOneWidget);
@@ -217,9 +224,22 @@ void main() {
     if (find.byTooltip('Open navigation menu').evaluate().isNotEmpty) {
       await tester.tap(find.byTooltip('Open navigation menu'));
       await _settle(tester);
+      await tester.ensureVisible(
+        find.descendant(
+          of: find.byType(Drawer),
+          matching: find.text('Settings'),
+        ),
+      );
+      await tester.tap(
+        find.descendant(
+          of: find.byType(Drawer),
+          matching: find.text('Settings'),
+        ),
+      );
+    } else {
+      await tester.ensureVisible(find.text('Settings').first);
+      await tester.tap(find.text('Settings').first);
     }
-    await tester.ensureVisible(find.text('Settings').first);
-    await tester.tap(find.text('Settings').first);
     await _settle(tester);
     final installed = AppVersion.parse(
       info.version,

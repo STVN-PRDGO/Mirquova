@@ -5,3 +5,4 @@ pub mod invitation;
 pub mod pairing;
 pub mod pairing_transport;
 pub mod presence;
+pub mod transfer;

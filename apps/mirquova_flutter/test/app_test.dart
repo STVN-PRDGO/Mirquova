@@ -60,11 +60,30 @@ void main() {
     await tester.pump();
   }
 
+  Future<void> openDevices(WidgetTester tester) async {
+    final menu = find.byTooltip('Open navigation menu');
+    if (menu.evaluate().isNotEmpty) {
+      await tester.tap(menu);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(Drawer),
+          matching: find.text('Devices'),
+        ),
+      );
+    } else {
+      await tester.ensureVisible(find.text('Devices').first);
+      await tester.tap(find.text('Devices').first);
+    }
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('no automatic network scan; scan and stop have visible states', (
     tester,
   ) async {
     final port = TestDiscovery();
     await launch(tester, port, const Size(1280, 800));
+    await openDevices(tester);
     expect(port.starts, 0);
     expect(find.text('No devices listed yet'), findsOneWidget);
     await tester.tap(find.text('Scan nearby'));
@@ -82,6 +101,7 @@ void main() {
     (tester) async {
       final port = TestDiscovery();
       await launch(tester, port, const Size(1280, 800));
+      await openDevices(tester);
       await tester.tap(find.text('Add LAN address'));
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -121,10 +141,25 @@ void main() {
       if (find.byTooltip('Open navigation menu').evaluate().isNotEmpty) {
         await tester.tap(find.byTooltip('Open navigation menu'));
         await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(
+            of: find.byType(Drawer),
+            matching: find.text('Transfer'),
+          ),
+        );
+      } else {
+        await tester.tap(find.text('Transfer').first);
       }
-      await tester.tap(find.text('Send').first);
       await tester.pumpAndSettle();
-      expect(find.text('Planned feature'), findsOneWidget);
+      expect(find.text('Select files'), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Select files'),
+            )
+            .onPressed,
+        isNotNull,
+      );
       expect(tester.takeException(), isNull);
     });
   }
@@ -148,6 +183,7 @@ void main() {
       final port = TestDiscovery()
         ..value = const DiscoverySnapshot(status: DiscoveryStatus.unavailable);
       await launch(tester, port, const Size(1280, 800));
+      await openDevices(tester);
       expect(
         tester
             .widget<FilledButton>(
@@ -175,6 +211,7 @@ void main() {
     tester,
   ) async {
     await launch(tester, TestDiscovery(), const Size(1280, 800));
+    await openDevices(tester);
     for (var attempt = 0; attempt < 2; attempt++) {
       await tester.tap(find.text('Add LAN address'));
       await tester.pumpAndSettle();
@@ -194,7 +231,8 @@ void main() {
       await launch(tester, port, const Size(1280, 800));
       await tester.tap(find.text('Cast').first);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Go to Nearby'));
+      await tester.ensureVisible(find.text('Open devices'));
+      await tester.tap(find.text('Open devices'));
       await tester.pumpAndSettle();
       expect(find.text('Your devices, closer.'), findsOneWidget);
       expect(port.starts, 0);
@@ -206,6 +244,7 @@ void main() {
     (tester) async {
       final port = TestDiscovery();
       await launch(tester, port, const Size(1280, 800));
+      await openDevices(tester);
       await port.makeDiscoverable('Office');
       await tester.pump();
       expect(find.text('Hides automatically in 2:00'), findsOneWidget);
@@ -234,7 +273,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Dark').last);
     await tester.pumpAndSettle();
-    final textContext = tester.element(find.text('Make yourself at home'));
+    final textContext = tester.element(find.text('Appearance'));
     expect(Theme.of(textContext).brightness, Brightness.dark);
     expect(tester.takeException(), isNull);
   });
@@ -243,6 +282,7 @@ void main() {
   ) async {
     final port = TestDiscovery();
     await launch(tester, port, const Size(1280, 800));
+    await openDevices(tester);
     expect(find.text('Hidden from discovery'), findsOneWidget);
     await tester.tap(find.text('Make discoverable'));
     await tester.pumpAndSettle();
@@ -267,6 +307,7 @@ void main() {
   ) async {
     final port = TestDiscovery();
     await launch(tester, port, const Size(1280, 800));
+    await openDevices(tester);
     await tester.tap(find.text('Make discoverable'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));

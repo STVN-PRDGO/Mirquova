@@ -40,3 +40,5 @@ The pairing messages now use a fixed v1 application protocol with explicit host/
 The requested app-update slice adds consented stable-release checks, direct package downloads with published-digest checks, and a local system package handoff in Settings. It does not complete Distribution: production signing, automatic desktop replacement, rollback and installation QA remain pending. See app-updates.md for the release contract and verification limits.
 
 The requested platform expansion adds Linux/iOS runners, Rust library packaging, Unix build scripts and CI jobs alongside the existing macOS/Windows/Android runners. See platform-builds.md for actual checks and unavailable build hosts. Wider-platform and Distribution milestones remain open pending native CI results, signing and physical-device acceptance.
+
+Local playback, local SubRip loading, and an authenticated file-transfer listener are now in the app. Same-host transfer tests cover approval, rejection, an empty file, and a name conflict. A Windows-to-Android transfer, screen capture, and a live OpenSubtitles call have not been run. A discovered name is still not a trusted peer or a cast target.

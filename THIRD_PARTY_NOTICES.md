@@ -8,6 +8,7 @@ Project code licensing and release identifiers remain undecided. Project-local t
 
 | Ecosystem | Package | Version | Declared license | Original notices |
 | --- | --- | --- | --- | --- |
+| dart | android_file_picker | 2.1.2 | See original license | [Present](third_party/licenses/dart/android_file_picker-2.1.2/) |
 | dart | args | 2.7.0 | See original license | [Present](third_party/licenses/dart/args-2.7.0/) |
 | dart | async | 2.13.1 | See original license | [Present](third_party/licenses/dart/async-2.13.1/) |
 | dart | boolean_selector | 2.1.2 | See original license | [Present](third_party/licenses/dart/boolean_selector-2.1.2/) |
@@ -15,11 +16,19 @@ Project code licensing and release identifiers remain undecided. Project-local t
 | dart | clock | 1.1.3 | See original license | [Present](third_party/licenses/dart/clock-1.1.3/) |
 | dart | code_assets | 1.2.1 | See original license | [Present](third_party/licenses/dart/code_assets-1.2.1/) |
 | dart | collection | 1.19.1 | See original license | [Present](third_party/licenses/dart/collection-1.19.1/) |
+| dart | cross_file | 0.3.5+5 | See original license | [Present](third_party/licenses/dart/cross_file-0.3.5+5/) |
 | dart | crypto | 3.0.7 | See original license | [Present](third_party/licenses/dart/crypto-3.0.7/) |
+| dart | csslib | 1.0.2 | See original license | [Present](third_party/licenses/dart/csslib-1.0.2/) |
+| dart | dbus | 0.8.0 | See original license | [Present](third_party/licenses/dart/dbus-0.8.0/) |
 | dart | fake_async | 1.3.3 | See original license | [Present](third_party/licenses/dart/fake_async-1.3.3/) |
 | dart | ffi | 2.2.0 | See original license | [Present](third_party/licenses/dart/ffi-2.2.0/) |
 | dart | ffi_leak_tracker | 0.1.2 | See original license | [Present](third_party/licenses/dart/ffi_leak_tracker-0.1.2/) |
 | dart | file | 7.0.1 | See original license | [Present](third_party/licenses/dart/file-7.0.1/) |
+| dart | file_picker | 13.3.0 | See original license | [Present](third_party/licenses/dart/file_picker-13.3.0/) |
+| dart | file_picker_darwin | 2.4.0 | See original license | [Present](third_party/licenses/dart/file_picker_darwin-2.4.0/) |
+| dart | file_picker_linux | 2.0.2 | See original license | [Present](third_party/licenses/dart/file_picker_linux-2.0.2/) |
+| dart | file_picker_platform_interface | 4.2.0 | See original license | [Present](third_party/licenses/dart/file_picker_platform_interface-4.2.0/) |
+| dart | file_picker_web | 4.2.0 | See original license | [Present](third_party/licenses/dart/file_picker_web-4.2.0/) |
 | dart | flutter | sdk | See original license | [Present](third_party/licenses/dart/flutter-sdk/) |
 | dart | flutter_driver | sdk | See original license | [Present](third_party/licenses/dart/flutter_driver-sdk/) |
 | dart | flutter_lints | 6.0.0 | See original license | [Present](third_party/licenses/dart/flutter_lints-6.0.0/) |
@@ -33,6 +42,7 @@ Project code licensing and release identifiers remain undecided. Project-local t
 | dart | flutter_web_plugins | sdk | See original license | [Present](third_party/licenses/dart/flutter_web_plugins-sdk/) |
 | dart | fuchsia_remote_debug_protocol | sdk | See original license | [Present](third_party/licenses/dart/fuchsia_remote_debug_protocol-sdk/) |
 | dart | hooks | 2.0.2 | See original license | [Present](third_party/licenses/dart/hooks-2.0.2/) |
+| dart | html | 0.15.7 | See original license | [Present](third_party/licenses/dart/html-0.15.7/) |
 | dart | integration_test | sdk | See original license | [Present](third_party/licenses/dart/integration_test-sdk/) |
 | dart | jni | 1.1.1 | See original license | [Present](third_party/licenses/dart/jni-1.1.1/) |
 | dart | jni_flutter | 1.0.4+1 | See original license | [Present](third_party/licenses/dart/jni_flutter-1.0.4+1/) |
@@ -55,6 +65,7 @@ Project code licensing and release identifiers remain undecided. Project-local t
 | dart | path_provider_linux | 2.2.2 | See original license | [Present](third_party/licenses/dart/path_provider_linux-2.2.2/) |
 | dart | path_provider_platform_interface | 2.1.3 | See original license | [Present](third_party/licenses/dart/path_provider_platform_interface-2.1.3/) |
 | dart | path_provider_windows | 2.3.0 | See original license | [Present](third_party/licenses/dart/path_provider_windows-2.3.0/) |
+| dart | petitparser | 7.0.2 | See original license | [Present](third_party/licenses/dart/petitparser-7.0.2/) |
 | dart | platform | 3.2.0 | See original license | [Present](third_party/licenses/dart/platform-3.2.0/) |
 | dart | plugin_platform_interface | 2.1.8 | See original license | [Present](third_party/licenses/dart/plugin_platform_interface-2.1.8/) |
 | dart | process | 5.0.6 | See original license | [Present](third_party/licenses/dart/process-5.0.6/) |
@@ -71,11 +82,19 @@ Project code licensing and release identifiers remain undecided. Project-local t
 | dart | test_api | 0.7.12 | See original license | [Present](third_party/licenses/dart/test_api-0.7.12/) |
 | dart | typed_data | 1.4.0 | See original license | [Present](third_party/licenses/dart/typed_data-1.4.0/) |
 | dart | vector_math | 2.4.0 | See original license | [Present](third_party/licenses/dart/vector_math-2.4.0/) |
+| dart | video_player | 2.14.1 | See original license | [Present](third_party/licenses/dart/video_player-2.14.1/) |
+| dart | video_player_android | 2.12.2 | See original license | [Present](third_party/licenses/dart/video_player_android-2.12.2/) |
+| dart | video_player_avfoundation | 2.12.3 | See original license | [Present](third_party/licenses/dart/video_player_avfoundation-2.12.3/) |
+| dart | video_player_platform_interface | 6.9.0 | See original license | [Present](third_party/licenses/dart/video_player_platform_interface-6.9.0/) |
+| dart | video_player_web | 2.4.0 | See original license | [Present](third_party/licenses/dart/video_player_web-2.4.0/) |
+| dart | video_player_win | 3.3.1 | See original license | [Present](third_party/licenses/dart/video_player_win-3.3.1/) |
 | dart | vm_service | 15.4.0 | See original license | [Present](third_party/licenses/dart/vm_service-15.4.0/) |
 | dart | web | 1.1.2 | See original license | [Present](third_party/licenses/dart/web-1.1.2/) |
 | dart | webdriver | 3.2.0 | See original license | [Present](third_party/licenses/dart/webdriver-3.2.0/) |
 | dart | win32 | 6.4.0 | See original license | [Present](third_party/licenses/dart/win32-6.4.0/) |
+| dart | windows_file_picker | 2.0.1 | See original license | [Present](third_party/licenses/dart/windows_file_picker-2.0.1/) |
 | dart | xdg_directories | 1.1.0 | See original license | [Present](third_party/licenses/dart/xdg_directories-1.1.0/) |
+| dart | xml | 7.0.1 | See original license | [Present](third_party/licenses/dart/xml-7.0.1/) |
 | dart | yaml | 3.1.4 | See original license | [Present](third_party/licenses/dart/yaml-3.1.4/) |
 | rust | asn1-rs | 0.7.2 | MIT OR Apache-2.0 | [Present](third_party/licenses/rust/asn1-rs-0.7.2/) |
 | rust | asn1-rs-derive | 0.6.0 | MIT OR Apache-2.0 | [Present](third_party/licenses/rust/asn1-rs-derive-0.6.0/) |
