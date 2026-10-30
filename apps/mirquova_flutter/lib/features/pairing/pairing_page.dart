@@ -283,51 +283,108 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final status = widget.controller.snapshot;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Pair devices', style: Theme.of(context).textTheme.headlineLarge),
-        const SizedBox(height: 8),
-        const Text(
-          'Create a temporary invitation or join a device. Compare the fingerprint through a separate trusted channel before continuing.',
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Theme(
+      data: theme.copyWith(
+        inputDecorationTheme: theme.inputDecorationTheme.copyWith(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 16,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: colors.outlineVariant),
+          ),
+          floatingLabelStyle: TextStyle(color: colors.primary),
         ),
-        const SizedBox(height: 24),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final host = _hostCard(context);
-            final join = _joinCard(context);
-            if (constraints.maxWidth < 760) {
-              return Column(children: [host, const SizedBox(height: 16), join]);
-            }
-            return Row(
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Pair devices',
+            style: theme.textTheme.headlineMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.8,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Connect with an invitation. You choose who to trust.',
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: colors.onSurfaceVariant,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colors.primaryContainer,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: host),
-                const SizedBox(width: 16),
-                Expanded(child: join),
+                Icon(
+                  Icons.shield_outlined,
+                  size: 20,
+                  color: colors.onPrimaryContainer,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Compare fingerprints through a separate trusted channel before pairing.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colors.onPrimaryContainer,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
               ],
-            );
-          },
-        ),
-        if (_error != null) ...[
-          const SizedBox(height: 16),
-          _errorBox(_error!),
-          if (widget.controller.identityRecoveryRequired) ...[
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _busy ? null : _recoverCorruptIdentity,
-              icon: const Icon(Icons.key_off_outlined),
-              label: const Text('Reset corrupt pairing identity'),
             ),
+          ),
+          const SizedBox(height: 24),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final host = _hostCard(context);
+              final join = _joinCard(context);
+              if (constraints.maxWidth < 760) {
+                return Column(
+                  children: [host, const SizedBox(height: 16), join],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: host),
+                  const SizedBox(width: 16),
+                  Expanded(child: join),
+                ],
+              );
+            },
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 16),
+            _errorBox(_error!),
+            if (widget.controller.identityRecoveryRequired) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _recoverCorruptIdentity,
+                icon: const Icon(Icons.key_off_outlined),
+                label: const Text('Reset corrupt pairing identity'),
+              ),
+            ],
           ],
-        ],
-        if (status.status != PairingStatus.idle) ...[
+          if (status.status != PairingStatus.idle) ...[
+            const SizedBox(height: 18),
+            _statusCard(status),
+          ],
           const SizedBox(height: 18),
-          _statusCard(status),
+          _trustedDevicesCard(),
         ],
-        const SizedBox(height: 18),
-        _trustedDevicesCard(),
-      ],
+      ),
     );
   }
 
@@ -337,14 +394,19 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Invite a device',
-            style: Theme.of(context).textTheme.titleLarge,
+          const _SectionHeading(
+            icon: Icons.qr_code_2,
+            title: 'Invite a device',
+            subtitle: 'Create an invitation on this device.',
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 24),
           TextField(
             controller: _hostAlias,
-            decoration: const InputDecoration(labelText: 'This device name'),
+            textInputAction: TextInputAction.next,
+            decoration: const InputDecoration(
+              labelText: 'This device name',
+              prefixIcon: Icon(Icons.devices_outlined),
+            ),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
@@ -358,10 +420,13 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
             onChanged: (value) => setState(() => _address = value),
           ),
           const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _busy ? null : _host,
-            icon: const Icon(Icons.qr_code_2),
-            label: const Text('Create invitation'),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _busy ? null : _host,
+              icon: const Icon(Icons.qr_code_2),
+              label: const Text('Create invitation'),
+            ),
           ),
           if (_hostPayload case final payload?) ...[
             const SizedBox(height: 16),
@@ -412,21 +477,53 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Join a device', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 14),
+          const _SectionHeading(
+            icon: Icons.add_link_outlined,
+            title: 'Join a device',
+            subtitle: 'Use an invitation from the other device.',
+          ),
+          const SizedBox(height: 24),
           TextField(
             controller: _joinAlias,
+            textInputAction: TextInputAction.next,
             decoration: const InputDecoration(
               labelText: 'Name shown to the host',
+              prefixIcon: Icon(Icons.devices_outlined),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 20),
           if (_qrScannerAvailable && _invitation == null && !_scannerOpen)
-            OutlinedButton.icon(
-              onPressed: () => setState(() => _scannerOpen = true),
-              icon: const Icon(Icons.camera_alt_outlined),
-              label: const Text('Scan QR code'),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => setState(() => _scannerOpen = true),
+                icon: const Icon(Icons.camera_alt_outlined),
+                label: const Text('Scan QR code'),
+              ),
             ),
+          if (_qrScannerAvailable && _invitation == null && !_scannerOpen) ...[
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                const Expanded(child: Divider()),
+                Flexible(
+                  flex: 3,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      'or paste invitation',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+                const Expanded(child: Divider()),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
           if (_scannerOpen)
             SizedBox(
               height: 240,
@@ -440,10 +537,12 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
           TextField(
             controller: _payload,
             enabled: !_busy,
-            maxLines: 3,
+            minLines: 2,
+            maxLines: 4,
             decoration: const InputDecoration(
               labelText: 'Invitation text',
-              hintText: 'Paste the invitation if you cannot scan',
+              hintText: 'Paste the invitation shared with you',
+              alignLabelWithHint: true,
             ),
             onChanged: (value) {
               if (_invitation != null) {
@@ -452,10 +551,13 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
             },
           ),
           const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: () => _parseInvitation(_payload.text),
-            icon: const Icon(Icons.link),
-            label: const Text('Read invitation'),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _parseInvitation(_payload.text),
+              icon: const Icon(Icons.link),
+              label: const Text('Read invitation'),
+            ),
           ),
           if (_invitation case final invitation?) ...[
             const SizedBox(height: 12),
@@ -562,8 +664,17 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
   Widget _errorBox(String value) => Container(
     width: double.infinity,
     padding: const EdgeInsets.all(12),
-    color: Theme.of(context).colorScheme.errorContainer,
-    child: Text(value),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.errorContainer,
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Semantics(
+      liveRegion: true,
+      child: Text(
+        value,
+        style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
+      ),
+    ),
   );
 
   Widget _trustedDevicesCard() => Card(
@@ -572,9 +683,10 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Trusted devices',
-            style: Theme.of(context).textTheme.titleLarge,
+          const _SectionHeading(
+            icon: Icons.verified_user_outlined,
+            title: 'Trusted devices',
+            subtitle: 'Devices you have verified on this installation.',
           ),
           const SizedBox(height: 8),
           FutureBuilder<List<TrustedPeer>>(
@@ -587,7 +699,15 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
               }
               if (!snapshot.hasData) return const LinearProgressIndicator();
               if (snapshot.data!.isEmpty) {
-                return const Text('No devices are trusted yet.');
+                return Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    'No devices are trusted yet.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                );
               }
               return Column(
                 children: [
@@ -624,6 +744,57 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
       ),
     ),
   );
+}
+
+class _SectionHeading extends StatelessWidget {
+  const _SectionHeading({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, size: 22, color: theme.colorScheme.primary),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _QrCode extends StatelessWidget {

@@ -289,7 +289,7 @@ class NearbyPage extends StatelessWidget {
                       SelectableText(peer.addresses.join(', ')),
                       const SizedBox(height: 8),
                       const Text(
-                        'Unverified - seen in the last scan. Pairing is not available yet.',
+                        'Unverified · seen in the last scan. Open Pair to verify this device with an invitation.',
                       ),
                     ],
                   ),

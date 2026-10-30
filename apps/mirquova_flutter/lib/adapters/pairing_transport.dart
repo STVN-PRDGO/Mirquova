@@ -314,6 +314,7 @@ class PairingController extends ChangeNotifier {
   Timer? _poller;
   bool _disposed = false;
   int _operationGeneration = 0;
+  int _trustSession = 0;
   String? _trustPersistedFingerprint;
   bool _savingTrust = false;
   bool _trustSaveFailed = false;
@@ -429,6 +430,12 @@ class PairingController extends ChangeNotifier {
   }
 
   void _beginPolling() {
+    // A completed save belongs to the pairing that produced it. Repository
+    // writes remain serialized even when a later session has already started.
+    _trustSession++;
+    _trustPersistedFingerprint = null;
+    _savingTrust = false;
+    _trustSaveFailed = false;
     _poller?.cancel();
     _poller = Timer.periodic(
       const Duration(milliseconds: 250),
@@ -475,20 +482,27 @@ class PairingController extends ChangeNotifier {
     _savingTrust = true;
     _trustSaveFailed = false;
     final alias = _snapshot.peerAlias ?? 'Mirquova device';
-    unawaited(
-      trustedPeers
-          .trust(alias: alias, certificateDer: certificate)
-          .then((_) {
-            _trustPersistedFingerprint = _fingerprint(certificate);
-          })
-          .catchError((Object _) {
-            _trustSaveFailed = true;
-          })
-          .whenComplete(() {
-            _savingTrust = false;
-            if (!_disposed) notifyListeners();
-          }),
-    );
+    unawaited(_saveTrustedPeer(_trustSession, alias, certificate));
+  }
+
+  Future<void> _saveTrustedPeer(
+    int session,
+    String alias,
+    Uint8List certificate,
+  ) async {
+    try {
+      await trustedPeers.trust(alias: alias, certificateDer: certificate);
+      if (session == _trustSession) {
+        _trustPersistedFingerprint = _fingerprint(certificate);
+      }
+    } on Object {
+      if (session == _trustSession) _trustSaveFailed = true;
+    } finally {
+      if (session == _trustSession) {
+        _savingTrust = false;
+        if (!_disposed) notifyListeners();
+      }
+    }
   }
 
   void stop() {

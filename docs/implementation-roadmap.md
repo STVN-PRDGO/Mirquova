@@ -37,6 +37,8 @@ Preview 03 completes local infrastructure builds and adds opted-in, expiring LAN
 
 The pairing messages now use a fixed v1 application protocol with explicit host/joiner role checks, separate from invitation JSON v2. Unsupported versions and role mismatches are rejected before identity enrollment. See the [pairing message contract](../shared/contracts/pairing-protocol.md).
 
+The 2026-10-30 [pairing persistence review](pairing-persistence-review.md) fixes overlapping-session trust saves and synchronous save failures. Local Rust checks and 134 Flutter functional/native-FFI tests pass; physical-device pairing acceptance remains outstanding.
+
 The requested app-update slice adds consented stable-release checks, direct package downloads with published-digest checks, and a local system package handoff in Settings. It does not complete Distribution: production signing, automatic desktop replacement, rollback and installation QA remain pending. See app-updates.md for the release contract and verification limits.
 
 The requested platform expansion adds Linux/iOS runners, Rust library packaging, Unix build scripts and CI jobs alongside the existing macOS/Windows/Android runners. See platform-builds.md for actual checks and unavailable build hosts. Wider-platform and Distribution milestones remain open pending native CI results, signing and physical-device acceptance.

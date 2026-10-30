@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mirquova/adapters/pairing_identity.dart';
 import 'package:mirquova/adapters/pairing_transport.dart';
 import 'package:mirquova/features/pairing/pairing_page.dart';
+import 'package:mirquova/theme.dart';
 
 class _Store implements PairingSecretStore {
   final values = <String, String>{};
@@ -93,10 +94,49 @@ void main() {
   tearDown(() => controller.dispose());
 
   Widget page() => MaterialApp(
+    theme: mirquovaTheme(Brightness.light),
     home: Scaffold(
       body: SingleChildScrollView(child: PairingPage(controller: controller)),
     ),
   );
+
+  for (final brightness in Brightness.values) {
+    for (final width in [375.0, 1024.0]) {
+      testWidgets(
+        'pairing layout at $width with 2x text in ${brightness.name}',
+        (tester) async {
+          await tester.binding.setSurfaceSize(Size(width, 812));
+          tester.platformDispatcher.textScaleFactorTestValue = 2;
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: mirquovaTheme(brightness),
+              home: Scaffold(
+                body: SingleChildScrollView(
+                  child: PairingPage(controller: controller),
+                ),
+              ),
+            ),
+          );
+          // Let the secure-store future finish outside the fake frame clock.
+          await tester.runAsync(() async {
+            await Future<void>.delayed(Duration.zero);
+          });
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(tester.takeException(), isNull);
+          await tester.ensureVisible(find.text('Read invitation'));
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(tester.takeException(), isNull);
+          await tester.ensureVisible(find.text('No devices are trusted yet.'));
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+  }
 
   Future<void> readInvitation(WidgetTester tester) async {
     final button = tester.widget<OutlinedButton>(
