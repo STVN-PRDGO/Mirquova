@@ -84,7 +84,7 @@ Project code licensing and release identifiers remain undecided. Project-local t
 | dart | vector_math | 2.4.0 | See original license | [Present](third_party/licenses/dart/vector_math-2.4.0/) |
 | dart | video_player | 2.14.1 | See original license | [Present](third_party/licenses/dart/video_player-2.14.1/) |
 | dart | video_player_android | 2.12.2 | See original license | [Present](third_party/licenses/dart/video_player_android-2.12.2/) |
-| dart | video_player_avfoundation | 2.12.3 | See original license | [Present](third_party/licenses/dart/video_player_avfoundation-2.12.3/) |
+| dart | video_player_avfoundation | 2.12.1 | See original license | [Present](third_party/licenses/dart/video_player_avfoundation-2.12.1/) |
 | dart | video_player_platform_interface | 6.9.0 | See original license | [Present](third_party/licenses/dart/video_player_platform_interface-6.9.0/) |
 | dart | video_player_web | 2.4.0 | See original license | [Present](third_party/licenses/dart/video_player_web-2.4.0/) |
 | dart | video_player_win | 3.3.1 | See original license | [Present](third_party/licenses/dart/video_player_win-3.3.1/) |

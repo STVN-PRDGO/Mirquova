@@ -14,6 +14,9 @@ dependencies:
   mobile_scanner: 7.4.2
   file_picker: ^13.3.0
   video_player: ^2.14.1
+  # 2.12.2 and later call AVAsset.load(_:isolation:), which the iOS SDK on
+  # the macOS 15 runner rejects. 2.12.1 is the last build that compiles there.
+  video_player_avfoundation: 2.12.1
   video_player_win: ^3.3.1
 dev_dependencies:
   flutter_test:
