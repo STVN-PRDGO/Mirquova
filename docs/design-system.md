@@ -14,12 +14,11 @@ Readable light/dark phone and desktop renders are in apps/mirquova_flutter/test/
 
 Preview 03 uses native Material consent/name entry and a visible Hide now control. The visibility status announces updates, and name errors use plain language. Widget tests exercise consent, cancellation and background cleanup; the actual Windows runner checks the flow.
 
-The 2026-10-30 pairing polish adds consistent icon-led section headers, quieter
-form borders, full-width invitation actions, a separated scan/paste choice and a
-visible fingerprint reminder. Errors use rounded containers, explicit error-text
-contrast and live-region semantics. These styles are scoped to Pair; Nearby's
-existing golden references were not regenerated. Nearby candidate copy now points
-to invitation pairing while keeping discovery claims explicitly unverified.
+Pairing is scan, tap a name, then approve on the other device. A discovered
+name is still not a trusted peer until that approval finishes. Errors use
+rounded containers, explicit error-text contrast and live-region semantics.
+These styles are scoped to Pair; Nearby's existing golden references were not
+regenerated. Nearby candidate copy keeps discovery claims explicitly unverified.
 
 Validation: Dart formatting and Flutter analysis passed; 138 non-golden tests
 passed with the native Rust library, including four Pair layout checks at phone

@@ -1,54 +1,41 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:crypto/crypto.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:qr/qr.dart';
 
 import '../../adapters/pairing_transport.dart';
 import '../../adapters/pairing_identity.dart';
 import '../../core/discovery_port.dart';
 import '../../core/pairing_invitation.dart';
+import 'pairing_offer.dart';
 import 'sonar_field.dart';
 
 class PairingPage extends StatefulWidget {
-  const PairingPage({super.key, required this.controller, this.discovery});
+  const PairingPage({
+    super.key,
+    required this.controller,
+    this.discovery,
+    this.fetchOffer,
+  });
   final PairingController controller;
   final DiscoveryPort? discovery;
+  final Future<String> Function(List<String> addresses)? fetchOffer;
 
   @override
   State<PairingPage> createState() => _PairingPageState();
 }
 
 class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
-  final _hostAlias = TextEditingController(text: Platform.localHostname);
-  final _joinAlias = TextEditingController(text: Platform.localHostname);
-  final _payload = TextEditingController();
+  final _alias = TextEditingController(text: Platform.localHostname);
   String? _address;
-  String? _hostPayload;
-  String? _hostFingerprint;
-  bool _hostInvitationCopied = false;
   String? _error;
-  PairingInvitation? _invitation;
-  bool _fingerprintConfirmed = false;
   bool _busy = false;
-  bool _scannerOpen = false;
+  bool _ready = false;
   String? _selectedPeerId;
   String? _connectHint;
   Future<List<TrustedPeer>>? _trustedList;
-  Timer? _invitationExpiry;
-  Timer? _joinInvitationExpiry;
-
-  bool get _qrScannerAvailable =>
-      !kIsWeb &&
-      const {
-        TargetPlatform.android,
-        TargetPlatform.iOS,
-        TargetPlatform.macOS,
-      }.contains(defaultTargetPlatform);
+  PairingOffer? _offer;
 
   @override
   void initState() {
@@ -81,10 +68,8 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
       PairingStatus.stopped,
       PairingStatus.error,
     }.contains(widget.controller.snapshot.status)) {
-      _invitationExpiry?.cancel();
-      _hostPayload = null;
-      _hostFingerprint = null;
-      _hostInvitationCopied = false;
+      unawaited(_closeOffer());
+      _ready = false;
     }
     if (widget.controller.snapshot.status == PairingStatus.paired) {
       _trustedList = widget.controller.trustedPeers.list();
@@ -96,11 +81,8 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_changed);
-    _invitationExpiry?.cancel();
-    _clearInvitation();
-    _hostAlias.dispose();
-    _joinAlias.dispose();
-    _payload.dispose();
+    unawaited(_closeOffer());
+    _alias.dispose();
     widget.controller.stop();
     super.dispose();
   }
@@ -114,28 +96,21 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
     }.contains(state)) {
       return;
     }
-    _invitationExpiry?.cancel();
-    _invitationExpiry = null;
-    _hostPayload = null;
-    _hostFingerprint = null;
-    _hostInvitationCopied = false;
-    _clearInvitation();
-    _payload.clear();
+    unawaited(_closeOffer());
+    _ready = false;
     widget.controller.stop();
     if (mounted && state != AppLifecycleState.detached) {
       setState(() => _error = 'Pairing stopped while Mirquova was hidden.');
     }
   }
 
-  void _clearInvitation() {
-    _joinInvitationExpiry?.cancel();
-    _joinInvitationExpiry = null;
-    _invitation?.dispose();
-    _invitation = null;
-    _fingerprintConfirmed = false;
+  Future<void> _closeOffer() async {
+    final offer = _offer;
+    _offer = null;
+    if (offer != null) await offer.close();
   }
 
-  Future<void> _host() async {
+  Future<void> _readyForDevices() async {
     if (_address == null) {
       setState(() => _error = 'No private IPv4 address is available.');
       return;
@@ -145,30 +120,21 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
       _error = null;
     });
     try {
+      final discovery = widget.discovery;
+      if (discovery != null) {
+        await discovery.makeDiscoverable(_alias.text.trim());
+      }
       final payload = await widget.controller.startHosting(
         localIpv4: _address!,
-        hostAlias: _hostAlias.text.trim(),
+        port: mirquovaPairListenPort,
+        hostAlias: _alias.text.trim(),
       );
-      final hostInvitation = PairingInvitation.parse(payload);
-      final fingerprint = hostInvitation.fingerprintSha256;
-      hostInvitation.dispose();
-      if (mounted) {
-        setState(() {
-          _hostPayload = payload;
-          _hostFingerprint = fingerprint;
-          _hostInvitationCopied = false;
-        });
-        _invitationExpiry?.cancel();
-        _invitationExpiry = Timer(const Duration(minutes: 2), () {
-          if (!mounted) return;
-          widget.controller.stop();
-          setState(() {
-            _hostPayload = null;
-            _hostFingerprint = null;
-            _hostInvitationCopied = false;
-          });
-        });
+      if (widget.fetchOffer == null) {
+        final offer = _offer ?? await PairingOffer.start();
+        offer.payload = payload;
+        _offer = offer;
       }
+      if (mounted) setState(() => _ready = true);
     } on Object catch (error) {
       if (mounted) setState(() => _error = '$error');
     } finally {
@@ -176,52 +142,40 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
     }
   }
 
-  void _parseInvitation(String payload) {
-    _clearInvitation();
-    try {
-      final value = PairingInvitation.parse(payload.trim());
-      _payload.clear();
-      setState(() {
-        _invitation = value;
-        _fingerprintConfirmed = false;
-        _error = null;
-        _scannerOpen = false;
-      });
-      _joinInvitationExpiry = Timer(Duration(seconds: value.ttlSeconds), () {
-        if (!mounted || !identical(_invitation, value)) return;
-        setState(() {
-          _clearInvitation();
-          _payload.clear();
-          _error = 'Invitation expired. Read a current invitation to pair.';
-        });
-      });
-    } on Object catch (error) {
-      setState(() => _error = 'Invitation could not be read: $error');
-    }
-  }
-
-  Future<void> _join() async {
-    final invitation = _invitation;
-    if (invitation == null || !_fingerprintConfirmed) return;
+  Future<void> _connect(PeerCandidate peer) async {
     setState(() {
-      _busy = true;
+      _selectedPeerId = peer.id;
+      _connectHint = null;
       _error = null;
+      _busy = true;
     });
+    PairingInvitation? invitation;
     try {
+      if (!_ready) await _readyForDevices();
+      if (!mounted || _error != null) return;
+      final payload = await (widget.fetchOffer ?? PairingOffer.fetch)(
+        peer.addresses,
+      );
+      invitation = PairingInvitation.parse(payload);
+      await _closeOffer();
+      _ready = false;
       await widget.controller.join(
         invitation,
-        alias: _joinAlias.text.trim(),
+        alias: _alias.text.trim(),
         fingerprintConfirmed: true,
       );
-    } on Object catch (error) {
-      if (mounted) setState(() => _error = '$error');
-    } finally {
-      invitation.dispose();
       if (mounted) {
-        setState(() {
-          _clearInvitation();
-        });
+        setState(() => _connectHint = 'Waiting for ${peer.name} to approve.');
       }
+    } on Object {
+      if (mounted) {
+        setState(
+          () => _error =
+              'Could not reach ${peer.name}. Press Scan on both devices, then tap the name again.',
+        );
+      }
+    } finally {
+      invitation?.dispose();
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -262,27 +216,6 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _copyHostInvitation(String payload) async {
-    try {
-      await Clipboard.setData(ClipboardData(text: payload));
-      if (!mounted) return;
-      setState(() => _hostInvitationCopied = true);
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Invitation copied. Treat it as a secret; it expires in two minutes.',
-            ),
-          ),
-        );
-    } on Object {
-      if (mounted) {
-        setState(() => _error = 'Could not copy the invitation. Try again.');
-      }
-    }
-  }
-
   PeerCandidate? get _selectedPeer {
     final peers = widget.discovery?.snapshot.peers ?? const <PeerCandidate>[];
     for (final peer in peers) {
@@ -292,21 +225,8 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
   }
 
   void _selectPeer(PeerCandidate peer) {
-    setState(() {
-      _selectedPeerId = peer.id;
-      _connectHint = null;
-      _error = null;
-    });
-  }
-
-  Future<void> _connectSelected() async {
-    if (_invitation != null && _fingerprintConfirmed) {
-      await _join();
-      return;
-    }
-    setState(() {
-      _connectHint = 'Read their invitation before connecting. A nearby name is not a connection.';
-    });
+    if (_busy) return;
+    unawaited(_connect(peer));
   }
 
   @override
@@ -348,7 +268,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
               ),
               const SizedBox(height: 8),
               Text(
-                'Scan, tap a device, then connect with its invitation.',
+                'Press Scan on both devices, then tap a name. The other device approves the request.',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: colors.onSurfaceVariant,
                   height: 1.5,
@@ -395,7 +315,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
                         name: selected.name,
                         hint: _connectHint,
                         busy: _busy,
-                        onConnect: _connectSelected,
+                        onConnect: () => _selectPeer(selected),
                       ),
               ),
               const SizedBox(height: 8),
@@ -403,73 +323,36 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  if (discovery != null)
-                    FilledButton.tonalIcon(
-                      onPressed: scanning
-                          ? discovery.stop
-                          : () {
-                              discovery.start();
-                            },
-                      icon: Icon(
-                        scanning ? Icons.stop_outlined : Icons.radar_outlined,
-                      ),
-                      label: Text(scanning ? 'Stop scan' : 'Scan'),
+                  FilledButton.tonalIcon(
+                    onPressed: _busy
+                        ? null
+                        : () {
+                            if (scanning || _ready) {
+                              discovery?.stop();
+                              discovery?.hide();
+                              unawaited(_closeOffer());
+                              widget.controller.stop();
+                              setState(() => _ready = false);
+                              return;
+                            }
+                            discovery?.start();
+                            unawaited(_readyForDevices());
+                          },
+                    icon: Icon(
+                      scanning || _ready
+                          ? Icons.stop_outlined
+                          : Icons.radar_outlined,
                     ),
-                  FilledButton.icon(
-                    onPressed: _busy ? null : _host,
-                    icon: const Icon(Icons.qr_code_2),
-                    label: const Text('Create invitation'),
+                    label: Text(scanning || _ready ? 'Stop' : 'Scan'),
                   ),
-                  if (_qrScannerAvailable &&
-                      _invitation == null &&
-                      !_scannerOpen)
-                    OutlinedButton.icon(
-                      onPressed: () => setState(() => _scannerOpen = true),
-                      icon: const Icon(Icons.camera_alt_outlined),
-                      label: const Text('Scan QR code'),
-                    ),
                 ],
               ),
-              if (_hostPayload case final payload?) ...[
-                const SizedBox(height: 16),
-                Center(child: _QrCode(payload: payload)),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _copyHostInvitation(payload),
-                  icon: Icon(
-                    _hostInvitationCopied ? Icons.check : Icons.copy_outlined,
-                  ),
-                  label: Text(
-                    _hostInvitationCopied
-                        ? 'Copy invitation again'
-                        : 'Copy invitation',
-                  ),
-                ),
-                const SizedBox(height: 8),
+              if (_ready) ...[
+                const SizedBox(height: 12),
                 const Text(
-                  'This one-use invitation expires after two minutes. The host still has to approve the request.',
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Your SHA-256 fingerprint (compare with the other device):',
-                ),
-                SelectableText(_groupFingerprint(_hostFingerprint ?? '')),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    _invitationExpiry?.cancel();
-                    widget.controller.stop();
-                    setState(() {
-                      _hostPayload = null;
-                      _hostFingerprint = null;
-                      _hostInvitationCopied = false;
-                    });
-                  },
-                  icon: const Icon(Icons.stop_circle_outlined),
-                  label: const Text('Stop invitation'),
+                  'This device is ready. Tap a name to connect. Approve the request on the other device.',
                 ),
               ],
-              const SizedBox(height: 16),
-              _joinFields(context),
               if (_error != null) ...[
                 const SizedBox(height: 16),
                 _errorBox(_error!),
@@ -495,71 +378,6 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _joinFields(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      if (_scannerOpen)
-        SizedBox(
-          height: 240,
-          child: MobileScanner(
-            onDetect: (capture) {
-              final raw = capture.barcodes.firstOrNull?.rawValue;
-              if (raw != null) _parseInvitation(raw);
-            },
-          ),
-        ),
-      TextField(
-        controller: _payload,
-        enabled: !_busy,
-        minLines: 2,
-        maxLines: 4,
-        decoration: const InputDecoration(
-          labelText: 'Invitation text',
-          hintText: 'Paste the invitation shared with you',
-          alignLabelWithHint: true,
-        ),
-        onChanged: (value) {
-          if (_invitation != null) {
-            setState(_clearInvitation);
-          }
-        },
-      ),
-      const SizedBox(height: 8),
-      SizedBox(
-        width: double.infinity,
-        child: OutlinedButton.icon(
-          onPressed: () => _parseInvitation(_payload.text),
-          icon: const Icon(Icons.link),
-          label: const Text('Read invitation'),
-        ),
-      ),
-      if (_invitation case final invitation?) ...[
-        const SizedBox(height: 12),
-        Text(
-          'Host fingerprint (SHA-256)',
-          style: Theme.of(context).textTheme.labelLarge,
-        ),
-        SelectableText(_groupFingerprint(invitation.fingerprintSha256)),
-        const SizedBox(height: 8),
-        CheckboxListTile(
-          contentPadding: EdgeInsets.zero,
-          value: _fingerprintConfirmed,
-          onChanged: (value) =>
-              setState(() => _fingerprintConfirmed = value ?? false),
-          title: const Text(
-            'I compared this fingerprint with the host through a trusted separate channel.',
-          ),
-          controlAffinity: ListTileControlAffinity.leading,
-        ),
-        FilledButton.icon(
-          onPressed: _busy || !_fingerprintConfirmed ? null : _join,
-          icon: const Icon(Icons.verified_user_outlined),
-          label: const Text('Verify and request pairing'),
-        ),
-      ],
-    ],
-  );
-
   Widget _statusCard(PairingSnapshot snapshot) => Card(
     child: Padding(
       padding: const EdgeInsets.all(18),
@@ -567,7 +385,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(switch (snapshot.status) {
-            PairingStatus.waitingForPeer => 'Invitation is active',
+            PairingStatus.waitingForPeer => 'Waiting for the other device',
             PairingStatus.connecting => 'Connecting securely…',
             PairingStatus.awaitingApproval => 'Pairing request',
             PairingStatus.paired => 'Device paired',
@@ -593,9 +411,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
           ],
           if (snapshot.awaitingApproval) ...[
             const SizedBox(height: 8),
-            const Text(
-              'The joining device completed certificate authentication. Compare its fingerprint through a trusted separate channel, and approve only if you initiated this request.',
-            ),
+            const Text('Approve only if you asked this device to connect.'),
             if (snapshot.peerCaCertificateDer case final certificate?) ...[
               const SizedBox(height: 6),
               const Text('Joining device fingerprint (SHA-256)'),
@@ -617,7 +433,8 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
               ],
             ),
           ],
-          if (snapshot.errorCode != null) Text('Error: ${snapshot.errorCode}'),
+          if (snapshot.errorCode case final code?)
+            Text(_plainPairingError(code)),
           if (snapshot.status == PairingStatus.connecting)
             OutlinedButton(
               onPressed: widget.controller.stop,
@@ -749,7 +566,7 @@ class _SelectedDevice extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                'Seen nearby. Not connected or trusted.',
+                'Tap connects. The other device still has to approve.',
                 style: TextStyle(color: colors.onSurfaceVariant, height: 1.4),
               ),
               if (hint != null) ...[
@@ -820,55 +637,10 @@ class _SectionHeading extends StatelessWidget {
   }
 }
 
-class _QrCode extends StatelessWidget {
-  const _QrCode({required this.payload});
-  final String payload;
-  @override
-  Widget build(BuildContext context) {
-    final code = QrCode(
-      payload: QrPayload.fromString(payload),
-      errorCorrectLevel: QrErrorCorrectLevel.medium,
-    );
-    final image = QrImage(code);
-    return Semantics(
-      label: 'Pairing invitation QR code',
-      child: SizedBox(
-        width: 220,
-        height: 220,
-        child: CustomPaint(painter: _QrPainter(image)),
-      ),
-    );
-  }
-}
-
-class _QrPainter extends CustomPainter {
-  const _QrPainter(this.image);
-  final QrImage image;
-  @override
-  void paint(Canvas canvas, Size size) {
-    final cell = size.width / (image.moduleCount + 8);
-    final paint = Paint()..color = Colors.black;
-    canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
-    for (var row = 0; row < image.moduleCount; row++) {
-      for (var col = 0; col < image.moduleCount; col++) {
-        if (image.isDark(row, col)) {
-          canvas.drawRect(
-            Rect.fromLTWH(
-              (col + 4) * cell,
-              (row + 4) * cell,
-              cell + .2,
-              cell + .2,
-            ),
-            paint,
-          );
-        }
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_QrPainter oldDelegate) => oldDelegate.image != image;
-}
+String _plainPairingError(String code) => switch (code) {
+  'bootstrap_connect' || 'mutual_connect' => 'Could not reach the other device. Press Scan on both devices, then tap the name again.',
+  _ => 'Pairing failed ($code).',
+};
 
 String _groupFingerprint(String value) => [
   for (var i = 0; i < value.length; i += 4)

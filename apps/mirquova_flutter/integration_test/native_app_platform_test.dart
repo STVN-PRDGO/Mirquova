@@ -215,10 +215,8 @@ void main() {
     }
     await _settle(tester);
     expect(find.text('Pair devices'), findsOneWidget);
-    expect(find.text('Invitation text'), findsOneWidget);
-    if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
-      expect(find.text('Scan QR code'), findsOneWidget);
-    }
+    expect(find.text('Scan'), findsOneWidget);
+    expect(find.text('Invitation text'), findsNothing);
     debugPrint('[native-pairing-smoke] Pair route loaded');
 
     if (find.byTooltip('Open navigation menu').evaluate().isNotEmpty) {

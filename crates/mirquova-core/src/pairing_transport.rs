@@ -108,7 +108,10 @@ impl HostSession {
         if !is_lan_address(local_ipv4) || !valid_alias(host_alias) {
             return Err(PairingTransportError::InvalidInput);
         }
-        let listener = TcpListener::bind(SocketAddrV4::new(local_ipv4, port))
+        // The invitation names one private address. The other device may only
+        // be able to reach a different address on this machine, so the listener
+        // accepts every local IPv4 interface. The invitation IP stays private.
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port))
             .map_err(|_| PairingTransportError::Network)?;
         listener
             .set_nonblocking(true)

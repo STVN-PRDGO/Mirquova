@@ -521,6 +521,7 @@ class PairingController extends ChangeNotifier {
   }
 
   void stop() {
+    if (_disposed) return;
     _operationGeneration++;
     _poller?.cancel();
     _poller = null;

@@ -1,8 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart'
-    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mirquova/adapters/pairing_identity.dart';
@@ -94,6 +93,36 @@ void main() {
 
   tearDown(() => controller.dispose());
 
+  Widget pageWithPeer({
+    required Future<String> Function(List<String> addresses) fetchOffer,
+  }) {
+    final discovery = _Discovery(
+      const DiscoverySnapshot(
+        peers: [
+          PeerCandidate(
+            id: 'kitchen',
+            name: 'Kitchen',
+            addresses: ['192.168.1.9'],
+            port: 0,
+          ),
+        ],
+      ),
+    );
+    addTearDown(discovery.dispose);
+    return MaterialApp(
+      theme: mirquovaTheme(Brightness.dark),
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: PairingPage(
+            controller: controller,
+            discovery: discovery,
+            fetchOffer: fetchOffer,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget page() => MaterialApp(
     theme: mirquovaTheme(Brightness.light),
     home: Scaffold(
@@ -127,9 +156,10 @@ void main() {
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 300));
           expect(tester.takeException(), isNull);
-          await tester.ensureVisible(find.text('Read invitation'));
+          await tester.ensureVisible(find.text('Scan'));
           await tester.pump(const Duration(milliseconds: 300));
           expect(tester.takeException(), isNull);
+          expect(find.text('Invitation text'), findsNothing);
           await tester.ensureVisible(find.text('No devices are trusted yet.'));
           await tester.pump(const Duration(milliseconds: 300));
           expect(tester.takeException(), isNull);
@@ -139,44 +169,23 @@ void main() {
     }
   }
 
-  Future<void> readInvitation(WidgetTester tester) async {
-    final button = tester.widget<OutlinedButton>(
-      find.widgetWithText(OutlinedButton, 'Read invitation'),
-    );
-    expect(button.onPressed, isNotNull);
-    button.onPressed!.call();
+  Future<void> scan(WidgetTester tester) async {
+    await tester.ensureVisible(find.text('Scan'));
+    await tester.tap(find.text('Scan'));
+    await tester.pump();
     await tester.pump();
   }
 
-  testWidgets('host invitation shows a QR code and comparison fingerprint', (
+  testWidgets('scan readies this device without an invitation form', (
     tester,
   ) async {
     await tester.pumpWidget(page());
     await tester.pump();
-    await tester.ensureVisible(find.text('Create invitation'));
-    await tester.tap(find.text('Create invitation'));
-    await tester.pump();
-    await tester.pump();
-
-    expect(
-      find.text('Your SHA-256 fingerprint (compare with the other device):'),
-      findsOneWidget,
-    );
-    expect(find.byType(CustomPaint), findsWidgets);
-    expect(find.text('Stop invitation'), findsOneWidget);
-  });
-
-  testWidgets('macOS pairing offers its QR scanner entry point', (
-    tester,
-  ) async {
-    final originalPlatform = debugDefaultTargetPlatformOverride;
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    try {
-      await tester.pumpWidget(page());
-      expect(find.text('Scan QR code'), findsOneWidget);
-    } finally {
-      debugDefaultTargetPlatformOverride = originalPlatform;
-    }
+    await scan(tester);
+    expect(find.textContaining('This device is ready'), findsOneWidget);
+    expect(find.text('Stop'), findsOneWidget);
+    expect(find.text('Invitation text'), findsNothing);
+    expect(find.text('Scan QR code'), findsNothing);
   });
 
   testWidgets('corrupt identity recovery requires a clear user confirmation', (
@@ -187,10 +196,7 @@ void main() {
     await tester.pumpWidget(page());
     await tester.pump();
 
-    await tester.ensureVisible(find.text('Create invitation'));
-    await tester.tap(find.text('Create invitation'));
-    await tester.pump();
-    await tester.pump();
+    await scan(tester);
     expect(find.text('Reset corrupt pairing identity'), findsOneWidget);
     expect(store.values[key], '{broken');
 
@@ -214,199 +220,59 @@ void main() {
     expect(store.values.containsKey(key), isFalse);
     expect(find.text('Reset corrupt pairing identity'), findsNothing);
 
-    await tester.ensureVisible(find.text('Create invitation'));
-    await tester.tap(find.text('Create invitation'));
-    await tester.pump();
-    await tester.pump();
+    await scan(tester);
     expect(store.values.containsKey(key), isTrue);
-    expect(find.text('Stop invitation'), findsOneWidget);
+    expect(find.textContaining('This device is ready'), findsOneWidget);
   });
 
-  testWidgets('hiding the app stops pairing and clears the host invitation', (
-    tester,
-  ) async {
+  testWidgets('hiding the app stops pairing', (tester) async {
     await tester.pumpWidget(page());
     await tester.pump();
-    await tester.ensureVisible(find.text('Create invitation'));
-    await tester.tap(find.text('Create invitation'));
-    await tester.pump();
-    await tester.pump();
-    expect(find.text('Stop invitation'), findsOneWidget);
+    await scan(tester);
+    expect(find.textContaining('This device is ready'), findsOneWidget);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump();
 
     expect(transport.stopped, isTrue);
-    expect(find.text('Stop invitation'), findsNothing);
+    expect(find.textContaining('This device is ready'), findsNothing);
     expect(
       find.text('Pairing stopped while Mirquova was hidden.'),
       findsOneWidget,
     );
   });
 
-  testWidgets('hiding the app clears a join invitation and fingerprint', (
-    tester,
-  ) async {
-    await tester.pumpWidget(page());
-    final invitationField = find.widgetWithText(TextField, 'Invitation text');
-    await tester.enterText(invitationField, _invitation);
-    await readInvitation(tester);
-    await tester.ensureVisible(find.byType(CheckboxListTile));
-    await tester.tap(find.byType(CheckboxListTile));
+  testWidgets('tapping a nearby device requests pairing', (tester) async {
+    await tester.pumpWidget(pageWithPeer(fetchOffer: (_) async => _invitation));
     await tester.pump();
-    expect(find.byType(CheckboxListTile), findsOneWidget);
-
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    await tester.tap(find.text('Kitchen'));
     await tester.pump();
-
-    expect(transport.stopped, isTrue);
-    expect(find.byType(CheckboxListTile), findsNothing);
-    expect(
-      find.widgetWithText(FilledButton, 'Verify and request pairing'),
-      findsNothing,
-    );
-    expect(tester.widget<TextField>(invitationField).controller!.text, isEmpty);
-    expect(
-      find.text('Pairing stopped while Mirquova was hidden.'),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('joining requires explicit fingerprint confirmation', (
-    tester,
-  ) async {
-    await tester.pumpWidget(page());
-    await tester.enterText(
-      find.widgetWithText(TextField, 'Invitation text'),
-      _invitation,
-    );
-    await readInvitation(tester);
-
-    final request = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Verify and request pairing'),
-    );
-    expect(request.onPressed, isNull);
-    expect(find.text('Host fingerprint (SHA-256)'), findsOneWidget);
-
-    await tester.ensureVisible(find.byType(CheckboxListTile));
-    await tester.tap(find.byType(CheckboxListTile));
-    await tester.pump();
-    final confirmedRequest = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Verify and request pairing'),
-    );
-    expect(confirmedRequest.onPressed, isNotNull);
-
-    await tester.ensureVisible(find.text('Verify and request pairing'));
-    await tester.tap(find.text('Verify and request pairing'));
-    await tester.pump();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(utf8.decode(transport.joinedPayload!), _invitation);
     expect(transport.joinedFingerprint, isNotEmpty);
     expect(find.text('Connecting securely…'), findsOneWidget);
-  });
-
-  testWidgets('editing an invitation clears its fingerprint confirmation', (
-    tester,
-  ) async {
-    await tester.pumpWidget(page());
-    final invitationField = find.widgetWithText(TextField, 'Invitation text');
-    await tester.enterText(invitationField, '$_invitation ');
-    await readInvitation(tester);
-    await tester.ensureVisible(find.byType(CheckboxListTile));
-    await tester.tap(find.byType(CheckboxListTile));
-    await tester.pump();
     expect(
-      tester
-          .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Verify and request pairing'),
-          )
-          .onPressed,
-      isNotNull,
-    );
-
-    await tester.enterText(invitationField, '$_invitation ');
-    await tester.pump();
-    expect(find.byType(CheckboxListTile), findsNothing);
-    expect(
-      find.widgetWithText(FilledButton, 'Verify and request pairing'),
-      findsNothing,
-    );
-  });
-
-  testWidgets('expired join invitation clears its fingerprint confirmation', (
-    tester,
-  ) async {
-    await tester.pumpWidget(page());
-    final invitationField = find.widgetWithText(TextField, 'Invitation text');
-    await tester.enterText(
-      invitationField,
-      _invitation.replaceFirst('"ttl_seconds":120', '"ttl_seconds":1'),
-    );
-    await readInvitation(tester);
-
-    await tester.ensureVisible(find.byType(CheckboxListTile));
-    await tester.tap(find.byType(CheckboxListTile));
-    await tester.pump();
-    expect(
-      tester
-          .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Verify and request pairing'),
-          )
-          .onPressed,
-      isNotNull,
-    );
-
-    await tester.pump(const Duration(seconds: 1));
-    expect(
-      find.text('Invitation expired. Read a current invitation to pair.'),
+      find.textContaining('Waiting for Kitchen to approve'),
       findsOneWidget,
     );
-    expect(find.byType(CheckboxListTile), findsNothing);
-    expect(
-      find.widgetWithText(FilledButton, 'Verify and request pairing'),
-      findsNothing,
-    );
   });
 
-  testWidgets('tapping a nearby device selects it and does not connect', (
+  testWidgets('an unreachable device is not treated as connected', (
     tester,
   ) async {
-    final discovery = _Discovery(
-      const DiscoverySnapshot(
-        peers: [
-          PeerCandidate(
-            id: 'kitchen',
-            name: 'Kitchen',
-            addresses: ['192.168.1.9'],
-            port: 0,
-          ),
-        ],
-      ),
-    );
-    addTearDown(discovery.dispose);
     await tester.pumpWidget(
-      MaterialApp(
-        theme: mirquovaTheme(Brightness.dark),
-        home: Scaffold(
-          body: SingleChildScrollView(
-            child: PairingPage(controller: controller, discovery: discovery),
-          ),
-        ),
+      pageWithPeer(
+        fetchOffer: (_) async => throw const SocketException('down'),
       ),
     );
     await tester.pump();
     await tester.tap(find.text('Kitchen'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
     expect(find.text('Connect to Kitchen'), findsOneWidget);
-    expect(find.text('Seen nearby. Not connected or trusted.'), findsOneWidget);
-    await tester.ensureVisible(find.text('Connect'));
-    await tester.tap(find.text('Connect'));
-    await tester.pump();
-    expect(
-      find.textContaining('A nearby name is not a connection.'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Could not reach Kitchen'), findsOneWidget);
     expect(transport.joinedPayload, isNull);
   });
 }
