@@ -22,36 +22,26 @@ class SystemUpdatesCard extends StatefulWidget {
 }
 
 class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
-  bool _askingPermission = false;
-
-  Future<void> _check(UpdateController updates) async {
-    setState(() {
-      _askingPermission = true;
-    });
-    final allowed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Check GitHub for updates?'),
-        content: const SingleChildScrollView(
-          child: Text(
-            'This check contacts api.github.com for Mirquova release information. GitHub receives your IP address and standard connection information. Your files and nearby-device information are not sent. Checks never run automatically.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Check now'),
-          ),
-        ],
-      ),
-    );
-    if (!mounted) return;
-    setState(() => _askingPermission = false);
-    if (allowed == true) await updates.check();
+  Future<void> _update(UpdateController updates) async {
+    final current = updates.release;
+    final currentAsset = current == null
+        ? null
+        : widget.packages.compatibleAsset(current);
+    if (widget.packages.status == PackageStatus.ready &&
+        currentAsset != null &&
+        widget.packages.asset?.url == currentAsset.url) {
+      await widget.packages.open();
+      return;
+    }
+    await updates.check();
+    if (!mounted || updates.status != UpdateStatus.available) return;
+    final release = updates.release;
+    if (release == null) return;
+    final asset = widget.packages.compatibleAsset(release);
+    if (asset == null) return;
+    await widget.packages.download(asset);
+    if (!mounted || widget.packages.status != PackageStatus.ready) return;
+    await widget.packages.open();
   }
 
   @override
@@ -238,8 +228,6 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
               ],
             ),
           ),
-          const SizedBox(height: 12),
-          Text(_installationHint(widget.packages.platform.packageName)),
         ],
         const SizedBox(height: 20),
         Wrap(
@@ -247,15 +235,11 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
           runSpacing: 12,
           children: [
             FilledButton.icon(
-              onPressed:
-                  updates == null ||
-                      checking ||
-                      _askingPermission ||
-                      widget.packages.busy
+              onPressed: updates == null || checking || widget.packages.busy
                   ? null
-                  : () => _check(updates),
+                  : () => _update(updates),
               icon: const Icon(Icons.system_update_outlined),
-              label: const Text('Check for updates'),
+              label: const Text('Update'),
             ),
             if (checking)
               OutlinedButton(
@@ -275,7 +259,7 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
         ],
         const SizedBox(height: 16),
         const Text(
-          'Checks and downloads are optional. No browser is required. Your system handles the final installation.',
+          'Press Update once. Mirquova checks, downloads, and opens the package. Nothing runs until you press it.',
         ),
       ],
     );
@@ -338,29 +322,6 @@ class _PackagePanel extends StatelessWidget {
     return '${(value / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
-  Future<void> _download(BuildContext context, UpdateAsset asset) async {
-    final allowed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Download this update?'),
-        content: Text(
-          'Download ${(asset.size / (1024 * 1024)).toStringAsFixed(1)} MB from GitHub and its release storage. The download is checked against its published SHA-256 digest. Installation starts only when you open the completed package.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Download now'),
-          ),
-        ],
-      ),
-    );
-    if (allowed == true && context.mounted) await packages.download(asset);
-  }
-
   @override
   Widget build(BuildContext context) {
     final asset = packages.compatibleAsset(release);
@@ -372,7 +333,6 @@ class _PackagePanel extends StatelessWidget {
       );
     }
     final current = packages.asset?.url == asset.url;
-    final ready = current && packages.status == PackageStatus.ready;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -385,12 +345,8 @@ class _PackagePanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Update download',
+            'Updating to ${release.version}',
             style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '${(asset.size / (1024 * 1024)).toStringAsFixed(1)} MB • SHA-256 checked',
           ),
           if (current && packages.message != null) ...[
             const SizedBox(height: 8),
@@ -412,52 +368,14 @@ class _PackagePanel extends StatelessWidget {
                 '(${((packages.progress ?? 0) * 100).floor()}%)',
               ),
             ),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: packages.cancel,
+              child: const Text('Cancel download'),
+            ),
           ],
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              FilledButton.icon(
-                onPressed: packages.busy
-                    ? null
-                    : () => _download(context, asset),
-                icon: const Icon(Icons.download_outlined),
-                label: Text(ready ? 'Download again' : 'Download update'),
-              ),
-              if (packages.status == PackageStatus.downloading)
-                OutlinedButton(
-                  onPressed: packages.cancel,
-                  child: const Text('Cancel download'),
-                ),
-              if (ready ||
-                  (current && packages.status == PackageStatus.opening))
-                OutlinedButton.icon(
-                  onPressed: packages.busy ? null : packages.open,
-                  icon: const Icon(Icons.install_desktop_outlined),
-                  label: Text(
-                    packages.status == PackageStatus.opening
-                        ? 'Opening package...'
-                        : 'Open downloaded update',
-                  ),
-                ),
-            ],
-          ),
         ],
       ),
     );
   }
-}
-
-String _installationHint(String? packageName) {
-  if (packageName?.endsWith('.apk') ?? false) {
-    return 'After the download finishes, open the APK and approve the installation in Android. If Android asks for permission, allow installs for Mirquova and open the package again.';
-  }
-  if (packageName?.endsWith('.zip') ?? false) {
-    return 'After the download finishes, open the ZIP in your system archive app. Close Mirquova, then replace the complete app bundle with the extracted copy.';
-  }
-  if (packageName?.endsWith('.tar.gz') ?? false) {
-    return 'After the download finishes, open the archive with your system archive app. Close Mirquova, then replace the complete app bundle with the extracted copy.';
-  }
-  return 'After the download finishes, open the package with your system. Follow its installation steps to complete the update.';
 }

@@ -141,79 +141,55 @@ void main() {
   }
 
   Future<void> startCheck(WidgetTester tester) async {
-    await tester.ensureVisible(find.text('Check for updates'));
-    await tester.tap(find.text('Check for updates'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Check now'));
+    await tester.ensureVisible(find.text('Update'));
+    await tester.tap(find.text('Update'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
   }
 
-  testWidgets(
-    'opening Settings and cancelling consent never contacts releases',
-    (tester) async {
-      final releases = _Releases();
-      final platform = _AppPlatform();
-      await launch(tester, releases, platform);
-      expect(platform.lookups, 1);
-      expect(find.text('Installed version: 0.2.0+2'), findsOneWidget);
-      expect(releases.calls, 0);
-      await tester.tap(find.text('Check for updates'));
-      await tester.pumpAndSettle();
-      expect(find.text('Check GitHub for updates?'), findsOneWidget);
-      expect(releases.calls, 0);
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
-      expect(releases.calls, 0);
-      expect(platform.opened, isEmpty);
-    },
-  );
+  testWidgets('opening Settings never contacts releases', (tester) async {
+    final releases = _Releases();
+    final platform = _AppPlatform();
+    await launch(tester, releases, platform);
+    expect(platform.lookups, 1);
+    expect(find.text('Installed version: 0.2.0+2'), findsOneWidget);
+    expect(find.text('Update'), findsOneWidget);
+    expect(releases.calls, 0);
+    expect(platform.opened, isEmpty);
+  });
 
-  testWidgets(
-    'release downloads in app after consent and opens the local package explicitly',
-    (tester) async {
-      final releases = _Releases();
-      final platform = _AppPlatform();
-      final packages = _Packages();
-      await launch(tester, releases, platform, packages: packages);
-      await startCheck(tester);
-      expect(releases.calls, 1);
-      expect(find.text('Checking for updates...'), findsOneWidget);
-      expect(find.text('Cancel check'), findsOneWidget);
-      expect(
-        tester
-            .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Check for updates'),
-            )
-            .onPressed,
-        isNull,
-      );
-      releases.requests.single.complete(_release());
-      await tester.pumpAndSettle();
-      expect(find.text('New release available'), findsOneWidget);
-      expect(find.text('Published version: 0.3.0+3'), findsOneWidget);
-      expect(platform.opened, isEmpty);
-      await tester.tap(find.text('What\u2019s new'));
-      await tester.pumpAndSettle();
-      expect(
-        find.text('Fixture release notes for offline UI tests.'),
-        findsOneWidget,
-      );
-      await tester.ensureVisible(find.text('Download update'));
-      await tester.tap(find.text('Download update'));
-      await tester.pumpAndSettle();
-      expect(packages.downloads, 0);
-      await tester.tap(find.text('Download now'));
-      await tester.pumpAndSettle();
-      expect(packages.downloads, 1);
-      expect(packages.opens, 0);
-      await tester.ensureVisible(find.text('Open downloaded update'));
-      await tester.tap(find.text('Open downloaded update'));
-      await tester.pumpAndSettle();
-      expect(packages.opens, 1);
-      expect(platform.opened, isEmpty);
-    },
-  );
+  testWidgets('one Update press checks, downloads, and opens the package', (
+    tester,
+  ) async {
+    final releases = _Releases();
+    final platform = _AppPlatform();
+    final packages = _Packages();
+    await launch(tester, releases, platform, packages: packages);
+    await startCheck(tester);
+    expect(releases.calls, 1);
+    expect(find.text('Checking for updates...'), findsOneWidget);
+    expect(find.text('Cancel check'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Update'))
+          .onPressed,
+      isNull,
+    );
+    expect(packages.downloads, 0);
+    releases.requests.single.complete(_release());
+    await tester.pumpAndSettle();
+    expect(find.text('New release available'), findsOneWidget);
+    expect(find.text('Updating to 0.3.0+3'), findsOneWidget);
+    expect(packages.downloads, 1);
+    expect(packages.opens, 1);
+    expect(platform.opened, isEmpty);
+    await tester.tap(find.text('What\u2019s new'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Fixture release notes for offline UI tests.'),
+      findsOneWidget,
+    );
+  });
 
   testWidgets('no release, current build, and offline failure are distinct', (
     tester,
@@ -286,9 +262,7 @@ void main() {
       expect(find.text('Installed version unavailable'), findsOneWidget);
       expect(
         tester
-            .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Check for updates'),
-            )
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Update'))
             .onPressed,
         isNull,
       );
@@ -301,26 +275,28 @@ void main() {
     },
   );
 
-  testWidgets(
-    'cancelling package consent makes no download or browser request',
-    (tester) async {
-      final releases = _Releases();
-      final platform = _AppPlatform();
-      final packages = _Packages();
-      await launch(tester, releases, platform, packages: packages);
-      await startCheck(tester);
-      releases.requests.single.complete(_release());
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Download update'));
-      await tester.tap(find.text('Download update'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
-      expect(packages.downloads, 0);
-      expect(platform.opened, isEmpty);
-      expect(find.text('Open release page'), findsNothing);
-    },
-  );
+  testWidgets('a release without a package does not download', (tester) async {
+    final releases = _Releases();
+    final platform = _AppPlatform();
+    final packages = _Packages();
+    await launch(tester, releases, platform, packages: packages);
+    await startCheck(tester);
+    releases.requests.single.complete(
+      UpdateRelease(
+        version: AppVersion.parse('0.3.0+3'),
+        pageUrl: Uri.parse(
+          'https://github.com/STVN-PRDGO/Mirquova/releases/tag/v0.3.0+3',
+        ),
+        notes: '',
+        assets: const [],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(packages.downloads, 0);
+    expect(packages.opens, 0);
+    expect(platform.opened, isEmpty);
+    expect(find.textContaining('no compatible package'), findsOneWidget);
+  });
 
   testWidgets('conflicting installed metadata keeps update checks disabled', (
     tester,
@@ -332,9 +308,7 @@ void main() {
     expect(find.text('Installed version unavailable'), findsOneWidget);
     expect(
       tester
-          .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Check for updates'),
-          )
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Update'))
           .onPressed,
       isNull,
     );
@@ -367,7 +341,7 @@ void main() {
         expect(tester.takeException(), isNull);
         releases.requests.single.complete(_release());
         await tester.pumpAndSettle();
-        await tester.ensureVisible(find.text('Download update'));
+        expect(find.text('Updating to 0.3.0+3'), findsOneWidget);
         expect(tester.takeException(), isNull);
         expect(find.text('New release available'), findsOneWidget);
       });

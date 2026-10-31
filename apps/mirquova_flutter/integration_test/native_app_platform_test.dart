@@ -246,12 +246,7 @@ void main() {
       buildNumber: info.buildNumber,
     );
     expect(find.text('Installed version: $installed'), findsOneWidget);
-    await tester.ensureVisible(find.text('Check for updates'));
-    await tester.tap(find.text('Check for updates'));
-    await _settle(tester);
-    expect(find.text('Check GitHub for updates?'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
-    await _settle(tester);
+    await tester.ensureVisible(find.text('Update'));
     expect(updates.requests, 0);
 
     // Call the platform channel directly to verify its independent validation.

@@ -125,7 +125,7 @@ The app loads libmirquova_core.so from jniLibs. Android Activity code acquires a
 
 ## App update checks
 
-Settings > System updates reads the installed app version locally. Check for updates asks permission to contact GitHub; no release request runs at startup. Development and automated verification use offline release fixtures unless a person explicitly opts into a live check. See [App updates](app-updates.md) for the release-tag contract and manual installation workflow. Production signing and installation QA remain outstanding.
+Settings > System updates reads the installed app version locally. Update is one button: it checks GitHub, downloads a newer package, and opens it. No release request runs until that button is pressed, and none runs at startup. Development and automated verification use offline release fixtures unless a person explicitly opts into a live check. See [App updates](app-updates.md) for the release-tag contract. Production signing and installation QA remain outstanding.
 
 The offline native bridge test can be run on Windows after loading the toolchain environment:
 
@@ -134,7 +134,7 @@ cd apps/mirquova_flutter
 flutter --suppress-analytics --no-version-check test integration_test/native_app_platform_test.dart -d windows --no-pub
 ```
 
-It reads installed metadata, opens Settings, cancels update consent and rejects invalid browser URLs without contacting the release API or opening a browser.
+It reads installed metadata, opens Settings, confirms Update makes no release request until it is pressed, and rejects invalid browser URLs without contacting the release API or opening a browser.
 
 ## Notices
 
