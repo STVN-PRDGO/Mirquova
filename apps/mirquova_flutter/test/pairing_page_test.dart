@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mirquova/adapters/pairing_identity.dart';
 import 'package:mirquova/adapters/pairing_transport.dart';
+import 'package:mirquova/core/discovery_port.dart';
 import 'package:mirquova/features/pairing/pairing_page.dart';
 import 'package:mirquova/theme.dart';
 
@@ -367,4 +368,60 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets('tapping a nearby device selects it and does not connect', (
+    tester,
+  ) async {
+    final discovery = _Discovery(
+      const DiscoverySnapshot(
+        peers: [
+          PeerCandidate(
+            id: 'kitchen',
+            name: 'Kitchen',
+            addresses: ['192.168.1.9'],
+            port: 0,
+          ),
+        ],
+      ),
+    );
+    addTearDown(discovery.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: mirquovaTheme(Brightness.dark),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: PairingPage(controller: controller, discovery: discovery),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Kitchen'));
+    await tester.pump();
+    expect(find.text('Connect to Kitchen'), findsOneWidget);
+    expect(find.text('Seen nearby. Not connected or trusted.'), findsOneWidget);
+    await tester.ensureVisible(find.text('Connect'));
+    await tester.tap(find.text('Connect'));
+    await tester.pump();
+    expect(
+      find.textContaining('A nearby name is not a connection.'),
+      findsOneWidget,
+    );
+    expect(transport.joinedPayload, isNull);
+  });
+}
+
+class _Discovery extends DiscoveryPort {
+  _Discovery(this._snapshot);
+  final DiscoverySnapshot _snapshot;
+  @override
+  DiscoverySnapshot get snapshot => _snapshot;
+  @override
+  Future<void> start() async {}
+  @override
+  void stop() {}
+  @override
+  Future<void> makeDiscoverable(String alias) async {}
+  @override
+  void hide() {}
 }

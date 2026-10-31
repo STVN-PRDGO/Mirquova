@@ -50,6 +50,8 @@ pub struct PairingSnapshot {
     pub status: PairingStatus,
     pub peer_alias: Option<String>,
     pub peer_ca_certificate_der_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peer_lan_ipv4: Option<String>,
     pub error_code: Option<&'static str>,
 }
 
@@ -425,6 +427,7 @@ fn host_worker(
         status: PairingStatus::AwaitingApproval,
         peer_alias: Some(proof.alias),
         peer_ca_certificate_der_hex: Some(encode_hex(&candidate_ca)),
+        peer_lan_ipv4: lan_peer_address(stream.get_ref()),
         error_code: None,
     });
 
@@ -658,6 +661,7 @@ fn join_worker(
             status: PairingStatus::Paired,
             peer_alias: response.peer_alias,
             peer_ca_certificate_der_hex: Some(encode_hex(invitation.identity_ca_certificate_der())),
+            peer_lan_ipv4: Some(invitation.endpoint().ip().to_string()),
             error_code: None,
         }),
         ResponseStatus::Rejected => state.update(|value| value.status = PairingStatus::Rejected),
@@ -871,6 +875,13 @@ fn encode_hex(bytes: &[u8]) -> String {
 
 fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error)
+}
+
+fn lan_peer_address(stream: &TcpStream) -> Option<String> {
+    let std::net::SocketAddr::V4(socket) = stream.peer_addr().ok()? else {
+        return None;
+    };
+    is_lan_address(*socket.ip()).then_some(socket.ip().to_string())
 }
 
 fn fail(state: &SharedState, error_code: &'static str) {

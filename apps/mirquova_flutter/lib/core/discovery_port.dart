@@ -157,3 +157,19 @@ class ManualEndpoint {
     return ManualEndpoint(bytes.join('.'), parsedPort);
   }
 }
+
+/// Prefer a normal home-LAN address over virtual and emulator ranges.
+List<String> preferredLanAddresses(Iterable<String> addresses) {
+  final values = addresses.toList();
+  values.sort((a, b) {
+    final rank = _lanRank(a).compareTo(_lanRank(b));
+    return rank == 0 ? a.compareTo(b) : rank;
+  });
+  return values;
+}
+
+int _lanRank(String address) {
+  if (address.startsWith('192.168.')) return 0;
+  if (address.startsWith('10.')) return 1;
+  return 2;
+}

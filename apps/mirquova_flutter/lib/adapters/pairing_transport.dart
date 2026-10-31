@@ -55,12 +55,14 @@ class PairingSnapshot {
     this.status = PairingStatus.idle,
     this.peerAlias,
     this.peerCaCertificateDer,
+    this.peerLanIpv4,
     this.errorCode,
   });
 
   final PairingStatus status;
   final String? peerAlias;
   final Uint8List? peerCaCertificateDer;
+  final String? peerLanIpv4;
   final String? errorCode;
   bool get awaitingApproval => status == PairingStatus.awaitingApproval;
 
@@ -76,6 +78,7 @@ class PairingSnapshot {
       status: state,
       peerAlias: json['peer_alias'] as String?,
       peerCaCertificateDer: certificate,
+      peerLanIpv4: json['peer_lan_ipv4'] as String?,
       errorCode: json['error_code'] as String?,
     );
   }
@@ -482,16 +485,28 @@ class PairingController extends ChangeNotifier {
     _savingTrust = true;
     _trustSaveFailed = false;
     final alias = _snapshot.peerAlias ?? 'Mirquova device';
-    unawaited(_saveTrustedPeer(_trustSession, alias, certificate));
+    unawaited(
+      _saveTrustedPeer(
+        _trustSession,
+        alias,
+        certificate,
+        _snapshot.peerLanIpv4,
+      ),
+    );
   }
 
   Future<void> _saveTrustedPeer(
     int session,
     String alias,
     Uint8List certificate,
+    String? lanIpv4,
   ) async {
     try {
-      await trustedPeers.trust(alias: alias, certificateDer: certificate);
+      await trustedPeers.trust(
+        alias: alias,
+        certificateDer: certificate,
+        lanIpv4: lanIpv4,
+      );
       if (session == _trustSession) {
         _trustPersistedFingerprint = _fingerprint(certificate);
       }

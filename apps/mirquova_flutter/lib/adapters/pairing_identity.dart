@@ -8,6 +8,8 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../core/discovery_port.dart';
+
 typedef _CreateNativeIdentity = Pointer<_NativePairingIdentity> Function();
 typedef _FreeNativeIdentity = Void Function(Pointer<_NativePairingIdentity>);
 typedef _ValidateIdentity = Int32 Function(
@@ -193,12 +195,14 @@ class TrustedPeer {
     required this.alias,
     required this.certificateDer,
     required this.pairedAt,
+    this.lanIpv4,
   });
 
   final String fingerprintSha256;
   final String alias;
   final String certificateDer;
   final DateTime pairedAt;
+  final String? lanIpv4;
 }
 
 class PairingTrustRepository {
@@ -221,12 +225,28 @@ class PairingTrustRepository {
       if (decoded is! List) throw const FormatException();
       return decoded
           .map((item) {
+            const allowed = {
+              'fingerprint',
+              'alias',
+              'certificate',
+              'paired_at',
+              'lan_ipv4',
+            };
             if (item is! Map<String, dynamic> ||
-                item.length != 4 ||
+                item.keys.any((key) => !allowed.contains(key)) ||
                 item['fingerprint'] is! String ||
                 item['alias'] is! String ||
                 item['certificate'] is! String ||
                 item['paired_at'] is! String) {
+              throw const FormatException();
+            }
+            final storedAddress = item['lan_ipv4'];
+            if (storedAddress != null && storedAddress is! String) {
+              throw const FormatException();
+            }
+            final lanIpv4 = storedAddress as String?;
+            if (lanIpv4 != null &&
+                ManualEndpoint.parse(lanIpv4, '1')?.address != lanIpv4) {
               throw const FormatException();
             }
             final peer = TrustedPeer(
@@ -234,6 +254,7 @@ class PairingTrustRepository {
               alias: item['alias'] as String,
               certificateDer: item['certificate'] as String,
               pairedAt: DateTime.parse(item['paired_at'] as String),
+              lanIpv4: lanIpv4,
             );
             if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(peer.fingerprintSha256) ||
                 peer.alias.isEmpty ||
@@ -258,17 +279,24 @@ class PairingTrustRepository {
     required String alias,
     required List<int> certificateDer,
     DateTime? pairedAt,
+    String? lanIpv4,
   }) {
     if (alias.isEmpty ||
         alias.length > 64 ||
         certificateDer.isEmpty ||
-        certificateDer.length > 512) {
+        certificateDer.length > 512 ||
+        (lanIpv4 != null &&
+            ManualEndpoint.parse(lanIpv4, '1')?.address != lanIpv4)) {
       throw const FormatException('Trusted peer identity is invalid.');
     }
     final encodedCertificate = base64Encode(certificateDer);
     final fingerprint = sha256.convert(certificateDer).toString();
     return _mutate(() async {
       final peers = await _readCurrent();
+      TrustedPeer? previous;
+      for (final peer in peers) {
+        if (peer.fingerprintSha256 == fingerprint) previous = peer;
+      }
       final updated = [
         for (final peer in peers)
           if (peer.fingerprintSha256 != fingerprint) peer,
@@ -276,7 +304,8 @@ class PairingTrustRepository {
           fingerprintSha256: fingerprint,
           alias: alias,
           certificateDer: encodedCertificate,
-          pairedAt: pairedAt ?? DateTime.now().toUtc(),
+          pairedAt: pairedAt ?? previous?.pairedAt ?? DateTime.now().toUtc(),
+          lanIpv4: lanIpv4 ?? previous?.lanIpv4,
         ),
       ];
       await store.write(storageKey, _encodePeers(updated));
@@ -317,6 +346,7 @@ class PairingTrustRepository {
         'alias': peer.alias,
         'certificate': peer.certificateDer,
         'paired_at': peer.pairedAt.toUtc().toIso8601String(),
+        if (peer.lanIpv4 != null) 'lan_ipv4': peer.lanIpv4,
       },
   ]);
 }

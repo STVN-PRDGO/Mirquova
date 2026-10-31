@@ -301,6 +301,28 @@ void main() {
     expect(store.values, isEmpty);
   });
 
+  test('a paired device keeps its saved LAN address across a rename', () async {
+    final store = _MemorySecretStore();
+    final repository = PairingTrustRepository(store: store);
+    final certificate = [0x30, 0x03, 0x02, 0x01, 0x01];
+    await repository.trust(
+      alias: 'Phone',
+      certificateDer: certificate,
+      lanIpv4: '192.168.1.20',
+    );
+    await repository.trust(alias: 'Kitchen', certificateDer: certificate);
+
+    final peers = await repository.list();
+    expect(peers.single.alias, 'Kitchen');
+    expect(peers.single.lanIpv4, '192.168.1.20');
+    expect(
+      jsonDecode(
+        store.values['mirquova.pairing.trusted_peers.v1']!,
+      )[0]['lan_ipv4'],
+      '192.168.1.20',
+    );
+  });
+
   test('corrupt trusted-peer fingerprints fail closed', () async {
     final store = _MemorySecretStore()
       ..values['mirquova.pairing.trusted_peers.v1'] = jsonEncode([

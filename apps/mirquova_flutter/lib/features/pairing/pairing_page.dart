@@ -10,11 +10,14 @@ import 'package:qr/qr.dart';
 
 import '../../adapters/pairing_transport.dart';
 import '../../adapters/pairing_identity.dart';
+import '../../core/discovery_port.dart';
 import '../../core/pairing_invitation.dart';
+import 'sonar_field.dart';
 
 class PairingPage extends StatefulWidget {
-  const PairingPage({super.key, required this.controller});
+  const PairingPage({super.key, required this.controller, this.discovery});
   final PairingController controller;
+  final DiscoveryPort? discovery;
 
   @override
   State<PairingPage> createState() => _PairingPageState();
@@ -25,7 +28,6 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
   final _joinAlias = TextEditingController(text: Platform.localHostname);
   final _payload = TextEditingController();
   String? _address;
-  List<String> _addresses = const [];
   String? _hostPayload;
   String? _hostFingerprint;
   bool _hostInvitationCopied = false;
@@ -34,6 +36,8 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
   bool _fingerprintConfirmed = false;
   bool _busy = false;
   bool _scannerOpen = false;
+  String? _selectedPeerId;
+  String? _connectHint;
   Future<List<TrustedPeer>>? _trustedList;
   Timer? _invitationExpiry;
   Timer? _joinInvitationExpiry;
@@ -57,12 +61,11 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
 
   Future<void> _loadAddresses() async {
     try {
-      final values = await widget.controller.localPrivateIpv4Addresses();
+      final values = preferredLanAddresses(
+        await widget.controller.localPrivateIpv4Addresses(),
+      );
       if (mounted) {
-        setState(() {
-          _addresses = values;
-          _address = values.firstOrNull;
-        });
+        setState(() => _address = values.firstOrNull);
       }
     } on Object catch (error) {
       if (mounted) setState(() => _error = '$error');
@@ -280,312 +283,281 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
     }
   }
 
+  PeerCandidate? get _selectedPeer {
+    final peers = widget.discovery?.snapshot.peers ?? const <PeerCandidate>[];
+    for (final peer in peers) {
+      if (peer.id == _selectedPeerId) return peer;
+    }
+    return null;
+  }
+
+  void _selectPeer(PeerCandidate peer) {
+    setState(() {
+      _selectedPeerId = peer.id;
+      _connectHint = null;
+      _error = null;
+    });
+  }
+
+  Future<void> _connectSelected() async {
+    if (_invitation != null && _fingerprintConfirmed) {
+      await _join();
+      return;
+    }
+    setState(() {
+      _connectHint = 'Read their invitation before connecting. A nearby name is not a connection.';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final status = widget.controller.snapshot;
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    return Theme(
-      data: theme.copyWith(
-        inputDecorationTheme: theme.inputDecorationTheme.copyWith(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 16,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: colors.outlineVariant),
-          ),
-          floatingLabelStyle: TextStyle(color: colors.primary),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Pair devices',
-            style: theme.textTheme.headlineMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.8,
+    final discovery = widget.discovery;
+    return ListenableBuilder(
+      listenable: discovery ?? widget.controller,
+      builder: (context, _) {
+        final status = widget.controller.snapshot;
+        final theme = Theme.of(context);
+        final colors = theme.colorScheme;
+        final reduce = MediaQuery.disableAnimationsOf(context);
+        final scanning = discovery?.snapshot.status == DiscoveryStatus.scanning;
+        final peers = discovery?.snapshot.peers ?? const <PeerCandidate>[];
+        final selected = _selectedPeer;
+        return Theme(
+          data: theme.copyWith(
+            inputDecorationTheme: theme.inputDecorationTheme.copyWith(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 16,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: colors.outlineVariant),
+              ),
+              floatingLabelStyle: TextStyle(color: colors.primary),
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Connect with an invitation. You choose who to trust.',
-            style: theme.textTheme.bodyLarge?.copyWith(
-              color: colors.onSurfaceVariant,
-              height: 1.5,
-            ),
-          ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: colors.primaryContainer,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.shield_outlined,
-                  size: 20,
-                  color: colors.onPrimaryContainer,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Pair devices',
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.8,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Compare fingerprints through a separate trusted channel before pairing.',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colors.onPrimaryContainer,
-                      height: 1.45,
-                    ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Scan, tap a device, then connect with its invitation.',
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: colors.onSurfaceVariant,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 360),
+                  child: SonarField(
+                    peers: peers,
+                    scanning: scanning,
+                    selectedId: selected?.id,
+                    onSelect: _selectPeer,
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final host = _hostCard(context);
-              final join = _joinCard(context);
-              if (constraints.maxWidth < 760) {
-                return Column(
-                  children: [host, const SizedBox(height: 16), join],
-                );
-              }
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: host),
-                  const SizedBox(width: 16),
-                  Expanded(child: join),
-                ],
-              );
-            },
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 16),
-            _errorBox(_error!),
-            if (widget.controller.identityRecoveryRequired) ...[
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: _busy ? null : _recoverCorruptIdentity,
-                icon: const Icon(Icons.key_off_outlined),
-                label: const Text('Reset corrupt pairing identity'),
               ),
+              const SizedBox(height: 12),
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  scanning
+                      ? 'Scanning nearby devices'
+                      : peers.isEmpty
+                      ? 'No nearby devices yet'
+                      : '${peers.length} nearby. None of these are connected.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              AnimatedSwitcher(
+                duration: reduce
+                    ? Duration.zero
+                    : const Duration(milliseconds: 280),
+                child: selected == null
+                    ? const SizedBox(
+                        key: ValueKey('none'),
+                        width: double.infinity,
+                      )
+                    : _SelectedDevice(
+                        key: ValueKey(selected.id),
+                        name: selected.name,
+                        hint: _connectHint,
+                        busy: _busy,
+                        onConnect: _connectSelected,
+                      ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (discovery != null)
+                    FilledButton.tonalIcon(
+                      onPressed: scanning
+                          ? discovery.stop
+                          : () {
+                              discovery.start();
+                            },
+                      icon: Icon(
+                        scanning ? Icons.stop_outlined : Icons.radar_outlined,
+                      ),
+                      label: Text(scanning ? 'Stop scan' : 'Scan'),
+                    ),
+                  FilledButton.icon(
+                    onPressed: _busy ? null : _host,
+                    icon: const Icon(Icons.qr_code_2),
+                    label: const Text('Create invitation'),
+                  ),
+                  if (_qrScannerAvailable &&
+                      _invitation == null &&
+                      !_scannerOpen)
+                    OutlinedButton.icon(
+                      onPressed: () => setState(() => _scannerOpen = true),
+                      icon: const Icon(Icons.camera_alt_outlined),
+                      label: const Text('Scan QR code'),
+                    ),
+                ],
+              ),
+              if (_hostPayload case final payload?) ...[
+                const SizedBox(height: 16),
+                Center(child: _QrCode(payload: payload)),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : () => _copyHostInvitation(payload),
+                  icon: Icon(
+                    _hostInvitationCopied ? Icons.check : Icons.copy_outlined,
+                  ),
+                  label: Text(
+                    _hostInvitationCopied
+                        ? 'Copy invitation again'
+                        : 'Copy invitation',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'This one-use invitation expires after two minutes. The host still has to approve the request.',
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Your SHA-256 fingerprint (compare with the other device):',
+                ),
+                SelectableText(_groupFingerprint(_hostFingerprint ?? '')),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    _invitationExpiry?.cancel();
+                    widget.controller.stop();
+                    setState(() {
+                      _hostPayload = null;
+                      _hostFingerprint = null;
+                      _hostInvitationCopied = false;
+                    });
+                  },
+                  icon: const Icon(Icons.stop_circle_outlined),
+                  label: const Text('Stop invitation'),
+                ),
+              ],
+              const SizedBox(height: 16),
+              _joinFields(context),
+              if (_error != null) ...[
+                const SizedBox(height: 16),
+                _errorBox(_error!),
+                if (widget.controller.identityRecoveryRequired) ...[
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _recoverCorruptIdentity,
+                    icon: const Icon(Icons.key_off_outlined),
+                    label: const Text('Reset corrupt pairing identity'),
+                  ),
+                ],
+              ],
+              if (status.status != PairingStatus.idle) ...[
+                const SizedBox(height: 18),
+                _statusCard(status),
+              ],
+              const SizedBox(height: 18),
+              _trustedDevicesCard(),
             ],
-          ],
-          if (status.status != PairingStatus.idle) ...[
-            const SizedBox(height: 18),
-            _statusCard(status),
-          ],
-          const SizedBox(height: 18),
-          _trustedDevicesCard(),
-        ],
-      ),
+          ),
+        );
+      },
     );
   }
 
-  Widget _hostCard(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SectionHeading(
-            icon: Icons.qr_code_2,
-            title: 'Invite a device',
-            subtitle: 'Create an invitation on this device.',
-          ),
-          const SizedBox(height: 24),
-          TextField(
-            controller: _hostAlias,
-            textInputAction: TextInputAction.next,
-            decoration: const InputDecoration(
-              labelText: 'This device name',
-              prefixIcon: Icon(Icons.devices_outlined),
-            ),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _address,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'LAN address'),
-            items: [
-              for (final address in _addresses)
-                DropdownMenuItem(value: address, child: Text(address)),
-            ],
-            onChanged: (value) => setState(() => _address = value),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _busy ? null : _host,
-              icon: const Icon(Icons.qr_code_2),
-              label: const Text('Create invitation'),
-            ),
-          ),
-          if (_hostPayload case final payload?) ...[
-            const SizedBox(height: 16),
-            Center(child: _QrCode(payload: payload)),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _busy ? null : () => _copyHostInvitation(payload),
-              icon: Icon(
-                _hostInvitationCopied ? Icons.check : Icons.copy_outlined,
-              ),
-              label: Text(
-                _hostInvitationCopied
-                    ? 'Copy invitation again'
-                    : 'Copy invitation',
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'This one-use invitation expires after two minutes. Share it only with the device you intend to pair. The host still has to approve the request.',
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Your SHA-256 fingerprint (compare with the other device):',
-            ),
-            SelectableText(_groupFingerprint(_hostFingerprint ?? '')),
-            OutlinedButton.icon(
-              onPressed: () {
-                _invitationExpiry?.cancel();
-                widget.controller.stop();
-                setState(() {
-                  _hostPayload = null;
-                  _hostFingerprint = null;
-                  _hostInvitationCopied = false;
-                });
-              },
-              icon: const Icon(Icons.stop_circle_outlined),
-              label: const Text('Stop invitation'),
-            ),
-          ],
-        ],
-      ),
-    ),
-  );
-
-  Widget _joinCard(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SectionHeading(
-            icon: Icons.add_link_outlined,
-            title: 'Join a device',
-            subtitle: 'Use an invitation from the other device.',
-          ),
-          const SizedBox(height: 24),
-          TextField(
-            controller: _joinAlias,
-            textInputAction: TextInputAction.next,
-            decoration: const InputDecoration(
-              labelText: 'Name shown to the host',
-              prefixIcon: Icon(Icons.devices_outlined),
-            ),
-          ),
-          const SizedBox(height: 20),
-          if (_qrScannerAvailable && _invitation == null && !_scannerOpen)
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => setState(() => _scannerOpen = true),
-                icon: const Icon(Icons.camera_alt_outlined),
-                label: const Text('Scan QR code'),
-              ),
-            ),
-          if (_qrScannerAvailable && _invitation == null && !_scannerOpen) ...[
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                const Expanded(child: Divider()),
-                Flexible(
-                  flex: 3,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(
-                      'or paste invitation',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ),
-                const Expanded(child: Divider()),
-              ],
-            ),
-            const SizedBox(height: 16),
-          ],
-          if (_scannerOpen)
-            SizedBox(
-              height: 240,
-              child: MobileScanner(
-                onDetect: (capture) {
-                  final raw = capture.barcodes.firstOrNull?.rawValue;
-                  if (raw != null) _parseInvitation(raw);
-                },
-              ),
-            ),
-          TextField(
-            controller: _payload,
-            enabled: !_busy,
-            minLines: 2,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              labelText: 'Invitation text',
-              hintText: 'Paste the invitation shared with you',
-              alignLabelWithHint: true,
-            ),
-            onChanged: (value) {
-              if (_invitation != null) {
-                setState(_clearInvitation);
-              }
+  Widget _joinFields(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      if (_scannerOpen)
+        SizedBox(
+          height: 240,
+          child: MobileScanner(
+            onDetect: (capture) {
+              final raw = capture.barcodes.firstOrNull?.rawValue;
+              if (raw != null) _parseInvitation(raw);
             },
           ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => _parseInvitation(_payload.text),
-              icon: const Icon(Icons.link),
-              label: const Text('Read invitation'),
-            ),
-          ),
-          if (_invitation case final invitation?) ...[
-            const SizedBox(height: 12),
-            Text(
-              'Host fingerprint (SHA-256)',
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
-            SelectableText(_groupFingerprint(invitation.fingerprintSha256)),
-            const SizedBox(height: 8),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _fingerprintConfirmed,
-              onChanged: (value) =>
-                  setState(() => _fingerprintConfirmed = value ?? false),
-              title: const Text(
-                'I compared this fingerprint with the host through a trusted separate channel.',
-              ),
-              controlAffinity: ListTileControlAffinity.leading,
-            ),
-            FilledButton.icon(
-              onPressed: _busy || !_fingerprintConfirmed ? null : _join,
-              icon: const Icon(Icons.verified_user_outlined),
-              label: const Text('Verify and request pairing'),
-            ),
-          ],
-        ],
+        ),
+      TextField(
+        controller: _payload,
+        enabled: !_busy,
+        minLines: 2,
+        maxLines: 4,
+        decoration: const InputDecoration(
+          labelText: 'Invitation text',
+          hintText: 'Paste the invitation shared with you',
+          alignLabelWithHint: true,
+        ),
+        onChanged: (value) {
+          if (_invitation != null) {
+            setState(_clearInvitation);
+          }
+        },
       ),
-    ),
+      const SizedBox(height: 8),
+      SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: () => _parseInvitation(_payload.text),
+          icon: const Icon(Icons.link),
+          label: const Text('Read invitation'),
+        ),
+      ),
+      if (_invitation case final invitation?) ...[
+        const SizedBox(height: 12),
+        Text(
+          'Host fingerprint (SHA-256)',
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+        SelectableText(_groupFingerprint(invitation.fingerprintSha256)),
+        const SizedBox(height: 8),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _fingerprintConfirmed,
+          onChanged: (value) =>
+              setState(() => _fingerprintConfirmed = value ?? false),
+          title: const Text(
+            'I compared this fingerprint with the host through a trusted separate channel.',
+          ),
+          controlAffinity: ListTileControlAffinity.leading,
+        ),
+        FilledButton.icon(
+          onPressed: _busy || !_fingerprintConfirmed ? null : _join,
+          icon: const Icon(Icons.verified_user_outlined),
+          label: const Text('Verify and request pairing'),
+        ),
+      ],
+    ],
   );
 
   Widget _statusCard(PairingSnapshot snapshot) => Card(
@@ -746,6 +718,57 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
   );
 }
 
+class _SelectedDevice extends StatelessWidget {
+  const _SelectedDevice({
+    super.key,
+    required this.name,
+    required this.hint,
+    required this.busy,
+    required this.onConnect,
+  });
+
+  final String name;
+  final String? hint;
+  final bool busy;
+  final VoidCallback onConnect;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return SizedBox(
+      width: double.infinity,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Connect to $name',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Seen nearby. Not connected or trusted.',
+                style: TextStyle(color: colors.onSurfaceVariant, height: 1.4),
+              ),
+              if (hint != null) ...[
+                const SizedBox(height: 8),
+                Text(hint!, style: TextStyle(color: colors.onSurface)),
+              ],
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: busy ? null : onConnect,
+                child: const Text('Connect'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SectionHeading extends StatelessWidget {
   const _SectionHeading({
     required this.icon,
@@ -809,9 +832,10 @@ class _QrCode extends StatelessWidget {
     final image = QrImage(code);
     return Semantics(
       label: 'Pairing invitation QR code',
-      child: CustomPaint(
-        size: const Size.square(220),
-        painter: _QrPainter(image),
+      child: SizedBox(
+        width: 220,
+        height: 220,
+        child: CustomPaint(painter: _QrPainter(image)),
       ),
     );
   }
@@ -824,7 +848,7 @@ class _QrPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final cell = size.width / (image.moduleCount + 8);
     final paint = Paint()..color = Colors.black;
-    canvas.drawColor(Colors.white, BlendMode.src);
+    canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
     for (var row = 0; row < image.moduleCount; row++) {
       for (var col = 0; col < image.moduleCount; col++) {
         if (image.isDark(row, col)) {

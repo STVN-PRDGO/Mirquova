@@ -159,7 +159,10 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
 
   Widget _pairingPage() {
     try {
-      return PairingPage(controller: _pairingController());
+      return PairingPage(
+        controller: _pairingController(),
+        discovery: widget.discovery,
+      );
     } on Object catch (error) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -12,6 +12,8 @@ try {
     try {
         flutter pub get --enforce-lockfile
         if ($LASTEXITCODE -ne 0) { throw 'Dependency resolution failed.' }
+        $atlCompat = Join-Path $projectRoot 'apps/mirquova_flutter/windows/atl_compat'
+        $env:CL = "/I`"$atlCompat`" $env:CL"
         flutter build windows "--$Mode"
         if ($LASTEXITCODE -ne 0) { throw 'Windows app build failed. Check Visual Studio C++ tooling.' }
     } finally { Pop-Location }

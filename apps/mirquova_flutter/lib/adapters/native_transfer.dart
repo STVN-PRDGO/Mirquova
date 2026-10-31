@@ -185,7 +185,7 @@ class TransferController extends ChangeNotifier {
     final identity = await identities.loadOrCreate();
     final config = jsonEncode({
       'local_ipv4': localIpv4,
-      'port': 0,
+      'port': mirquovaTransferPort,
       'destination_directory': destination,
       'peer_ca_certificates_der_hex': [
         for (final peer in peers) _hex(base64Decode(peer.certificateDer)),

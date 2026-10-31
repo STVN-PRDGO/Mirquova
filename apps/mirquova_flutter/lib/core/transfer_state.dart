@@ -1,3 +1,6 @@
+/// Shared listen port. The person using the app chooses a device name, not this port.
+const mirquovaTransferPort = 40733;
+
 enum TransferStatus {
   idle,
   listening,
@@ -97,22 +100,21 @@ TransferFileState _fileState(String? value) => switch (value) {
   _ => TransferFileState.pending,
 };
 
-String transferStatusMessage(
-  TransferSnapshot snapshot,
-) => switch (snapshot.status) {
-  TransferStatus.idle => 'No transfer is running.',
-  TransferStatus.listening =>
-    'Waiting for a trusted device${snapshot.endpoint == null ? '' : ' on ${snapshot.endpoint}'}.',
-  TransferStatus.connecting => 'Connecting to the trusted device.',
-  TransferStatus.awaitingApproval =>
-    'Review the file list before anything is saved.',
-  TransferStatus.transferring =>
-    'Transferring. Checksums are verified before a file is kept.',
-  TransferStatus.completed => 'Transfer finished and the checksums matched.',
-  TransferStatus.rejected => 'The transfer was declined. No file was kept.',
-  TransferStatus.stopped => 'The transfer was stopped.',
-  TransferStatus.error => _error(snapshot.errorCode),
-};
+String transferStatusMessage(TransferSnapshot snapshot) =>
+    switch (snapshot.status) {
+      TransferStatus.idle => 'No transfer is running.',
+      TransferStatus.listening => 'Waiting for a paired device.',
+      TransferStatus.connecting => 'Connecting to the trusted device.',
+      TransferStatus.awaitingApproval =>
+        'Review the file list before anything is saved.',
+      TransferStatus.transferring =>
+        'Transferring. Checksums are verified before a file is kept.',
+      TransferStatus.completed =>
+        'Transfer finished and the checksums matched.',
+      TransferStatus.rejected => 'The transfer was declined. No file was kept.',
+      TransferStatus.stopped => 'The transfer was stopped.',
+      TransferStatus.error => _error(snapshot.errorCode),
+    };
 
 String _error(String? code) => switch (code) {
   'network' => 'The paired device could not be reached on this LAN.',
@@ -123,8 +125,7 @@ String _error(String? code) => switch (code) {
   'protocol' =>
     'The other device sent a transfer message this app does not accept.',
   'invalid_name' => 'That file name is not allowed.',
-  'invalid_input' =>
-    'Choose a private LAN address, a paired device, and a real file.',
+  'invalid_input' => 'Choose a paired device and a real file.',
   'storage' => 'The file could not be read or saved.',
   'cancelled' => 'The transfer was stopped.',
   'not_verified' => 'The receiver did not confirm the file.',

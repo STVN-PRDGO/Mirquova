@@ -19,13 +19,13 @@ class TransferPage extends StatefulWidget {
 }
 
 class _TransferPageState extends State<TransferPage> {
-  final _host = TextEditingController();
-  final _port = TextEditingController();
   bool _send = true;
   final _files = <_QueuedFile>[];
   String? _destination;
   String? _localAddress;
-  List<String> _localAddresses = const [];
+  List<TrustedPeer> _peers = const [];
+  String? _selectedFingerprint;
+  String? _activeAlias;
   String? _notice;
   TransferController? _transfer;
 
@@ -33,13 +33,14 @@ class _TransferPageState extends State<TransferPage> {
   void initState() {
     super.initState();
     _loadAddresses();
+    _loadPeers();
   }
 
   Future<void> _loadAddresses() async {
     try {
       await _readAddresses();
     } on Object {
-      if (mounted) setState(() => _localAddresses = const []);
+      if (mounted) setState(() => _localAddress = null);
     }
   }
 
@@ -57,11 +58,35 @@ class _TransferPageState extends State<TransferPage> {
       }
     }
     if (!mounted) return;
-    final sorted = addresses.toList()..sort();
-    setState(() {
-      _localAddresses = sorted;
-      _localAddress ??= sorted.isEmpty ? null : sorted.first;
-    });
+    final sorted = preferredLanAddresses(addresses);
+    setState(() => _localAddress = sorted.firstOrNull);
+  }
+
+  Future<void> _loadPeers() async {
+    final controller = _transfer ?? await widget.ensureTransfer();
+    if (!mounted || controller == null) return;
+    try {
+      final peers = await controller.trustedPeers.list();
+      if (!mounted) return;
+      setState(() {
+        _peers = peers;
+        _selectedFingerprint =
+            peers.any((peer) => peer.fingerprintSha256 == _selectedFingerprint)
+            ? _selectedFingerprint
+            : (peers.length == 1 ? peers.single.fingerprintSha256 : null);
+      });
+    } on Object {
+      if (mounted) {
+        setState(() => _notice = 'Trusted devices could not be read.');
+      }
+    }
+  }
+
+  TrustedPeer? get _selectedPeer {
+    for (final peer in _peers) {
+      if (peer.fingerprintSha256 == _selectedFingerprint) return peer;
+    }
+    return null;
   }
 
   void _attach(TransferController controller) {
@@ -79,8 +104,6 @@ class _TransferPageState extends State<TransferPage> {
   @override
   void dispose() {
     _transfer?.removeListener(_onTransfer);
-    _host.dispose();
-    _port.dispose();
     super.dispose();
   }
 
@@ -120,53 +143,26 @@ class _TransferPageState extends State<TransferPage> {
       );
       return;
     }
-    final endpoint = ManualEndpoint.parse(_host.text, _port.text);
-    if (endpoint == null || _files.isEmpty) {
-      setState(() {
-        _notice = 'Enter the receiver’s private IPv4 address and port, and choose a file.';
-      });
+    final peer = _selectedPeer;
+    if (peer == null || _files.isEmpty) {
+      setState(() => _notice = 'Choose a paired device and a file.');
       return;
     }
-    List<TrustedPeer> peers;
-    try {
-      peers = await controller.trustedPeers.list();
-    } on Object {
-      if (!mounted) return;
-      setState(() => _notice = 'Trusted devices could not be read.');
+    final host = peer.lanIpv4;
+    if (host == null) {
+      setState(() => _notice = 'Pair ${peer.alias} again, then send the file.');
       return;
     }
-    if (!mounted) return;
-    if (peers.isEmpty) {
-      setState(() => _notice = 'Pair a device before sending files.');
-      return;
-    }
-    final peer = peers.length == 1 ? peers.single : await _choosePeer(peers);
-    if (!mounted || peer == null) return;
     setState(() {
       _attach(controller);
+      _activeAlias = peer.alias;
       _notice = null;
     });
     await controller.send(
       peer: peer,
-      host: endpoint.address,
-      port: endpoint.port,
+      host: host,
+      port: mirquovaTransferPort,
       paths: [for (final file in _files) file.path],
-    );
-  }
-
-  Future<TrustedPeer?> _choosePeer(List<TrustedPeer> peers) {
-    return showDialog<TrustedPeer>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Send to a paired device'),
-        children: [
-          for (final peer in peers)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(context, peer),
-              child: Text(peer.alias),
-            ),
-        ],
-      ),
     );
   }
 
@@ -181,17 +177,59 @@ class _TransferPageState extends State<TransferPage> {
     }
     final address = _localAddress;
     final destination = _destination;
+    if (_peers.isEmpty) {
+      setState(() => _notice = 'Pair a device before receiving files.');
+      return;
+    }
     if (address == null || destination == null) {
-      setState(() {
-        _notice = 'Choose a private address and a folder before receiving.';
-      });
+      setState(() => _notice = 'Choose a folder before receiving.');
       return;
     }
     setState(() {
       _attach(controller);
+      _activeAlias = _peers.length == 1 ? _peers.single.alias : null;
       _notice = null;
     });
     await controller.receive(localIpv4: address, destination: destination);
+  }
+
+  String _statusLine(TransferSnapshot snapshot) {
+    if (snapshot.status == TransferStatus.listening) {
+      final alias = _activeAlias;
+      if (alias != null) return 'Waiting for $alias.';
+    }
+    if (snapshot.status == TransferStatus.connecting) {
+      final alias = _activeAlias;
+      if (alias != null) return 'Connecting to $alias.';
+    }
+    return transferStatusMessage(snapshot);
+  }
+
+  Widget _deviceNames() {
+    final theme = Theme.of(context);
+    if (_peers.isEmpty) {
+      return Text(
+        _send
+            ? 'Pair a device before sending files.'
+            : 'Pair a device before receiving files.',
+      );
+    }
+    if (_peers.length == 1) {
+      return Text(_peers.single.alias, style: theme.textTheme.titleMedium);
+    }
+    return Column(
+      children: [
+        for (final peer in _peers)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.devices_outlined),
+            title: Text(peer.alias),
+            selected: peer.fingerprintSha256 == _selectedFingerprint,
+            onTap: () =>
+                setState(() => _selectedFingerprint = peer.fingerprintSha256),
+          ),
+      ],
+    );
   }
 
   @override
@@ -234,57 +272,35 @@ class _TransferPageState extends State<TransferPage> {
           onPickFolder: _pickFolder,
         ),
         const SizedBox(height: 16),
-        if (_send) ...[
-          TextField(
-            controller: _host,
-            decoration: const InputDecoration(
-              labelText: 'Receiver private IPv4',
-              helperText: 'Use the address shown on the paired device.',
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _port,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Receiver port'),
-          ),
-          const SizedBox(height: 12),
+        _deviceNames(),
+        const SizedBox(height: 12),
+        if (_send)
           FilledButton.icon(
-            onPressed: _files.isEmpty ? null : _startSend,
-            icon: const Icon(Icons.send_outlined),
-            label: const Text('Send to paired device'),
-          ),
-        ] else ...[
-          DropdownButtonFormField<String>(
-            key: ValueKey(_localAddress),
-            initialValue: _localAddresses.contains(_localAddress)
-                ? _localAddress
-                : null,
-            decoration: const InputDecoration(
-              labelText: 'This device’s private address',
-            ),
-            items: [
-              for (final address in _localAddresses)
-                DropdownMenuItem(value: address, child: Text(address)),
-            ],
-            onChanged: _localAddresses.isEmpty
+            onPressed: _files.isEmpty || _selectedPeer == null
                 ? null
-                : (value) => setState(() => _localAddress = value),
-          ),
-          const SizedBox(height: 12),
+                : _startSend,
+            icon: const Icon(Icons.send_outlined),
+            label: Text(
+              _selectedPeer == null
+                  ? 'Send'
+                  : 'Send to ${_selectedPeer!.alias}',
+            ),
+          )
+        else
           FilledButton.icon(
-            onPressed: _destination == null ? null : _startReceive,
+            onPressed: _destination == null || _peers.isEmpty
+                ? null
+                : _startReceive,
             icon: const Icon(Icons.downloading_outlined),
-            label: const Text('Wait for a paired device'),
+            label: Text(
+              _peers.length == 1
+                  ? 'Receive from ${_peers.single.alias}'
+                  : 'Receive from a paired device',
+            ),
           ),
-        ],
         if (snapshot != null) ...[
           const SizedBox(height: 16),
-          Text(transferStatusMessage(snapshot)),
-          if (snapshot.endpoint != null) ...[
-            const SizedBox(height: 8),
-            SelectableText(snapshot.endpoint!),
-          ],
+          Text(_statusLine(snapshot)),
           for (final file in snapshot.files)
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -386,7 +402,7 @@ class _DropZone extends StatelessWidget {
                       : files.map((file) => file.name).join(', '))
                 : (destination == null
                       ? 'Choose a folder. Files are written only after you approve an offer.'
-                      : destination!),
+                      : 'Folder ready. Files are written only after you approve an offer.'),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 18),
