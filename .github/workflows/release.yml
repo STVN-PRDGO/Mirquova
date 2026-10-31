@@ -2,23 +2,77 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release tag name (e.g. v0.3.0)'
-        required: true
-        default: 'v0.3.0'
+        description: 'Optional release tag, such as v0.3.6. Leave empty to use the next patch.'
+        required: false
+        default: ''
+
+concurrency:
+  group: release-main
+  cancel-in-progress: true
 
 permissions:
   contents: write
 
 jobs:
+  version:
+    name: Next release version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release_tag.outputs.tag }}
+      build_name: ${{ steps.release_tag.outputs.build_name }}
+      build_number: ${{ steps.release_tag.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Choose the next stable tag
+        id: release_tag
+        env:
+          REQUESTED_TAG: ${{ github.event.inputs.tag_name }}
+        run: |
+          git fetch origin --tags
+          python3 - <<'PY'
+          import os, re, subprocess
+          pattern = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\+([0-9]+))?$")
+          requested = os.environ.get("REQUESTED_TAG", "").strip()
+          if requested:
+              tag = requested
+          else:
+              raw = subprocess.check_output(["git", "tag", "-l", "v*"], text=True)
+              best = (0, 0, 0)
+              for line in raw.splitlines():
+                  match = pattern.fullmatch(line.strip())
+                  if not match:
+                      continue
+                  current = tuple(int(match.group(i)) for i in range(1, 4))
+                  if current > best:
+                      best = current
+              tag = f"v{best[0]}.{best[1]}.{best[2] + 1}"
+          match = pattern.fullmatch(tag)
+          if not match:
+              raise SystemExit("Expected a stable release tag such as v0.3.6.")
+          name = f"{match.group(1)}.{match.group(2)}.{match.group(3)}"
+          number = match.group(4) or match.group(3)
+          if subprocess.call(["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"], stdout=subprocess.DEVNULL) == 0:
+              raise SystemExit(f"Tag {tag} already exists.")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"tag={tag}\nbuild_name={name}\nbuild_number={number}\n")
+          print(f"Next release {tag} ({name}+{number})")
+          PY
+
   windows:
     name: Build Windows Release Package
+    needs: version
     runs-on: windows-latest
     timeout-minutes: 45
+    env:
+      MIRQUOVA_BUILD_NAME: ${{ needs.version.outputs.build_name }}
+      MIRQUOVA_BUILD_NUMBER: ${{ needs.version.outputs.build_number }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -43,7 +97,7 @@ jobs:
             throw "Native library not found at $coreDll"
           }
           $env:MIRQUOVA_CORE_BUNDLE = $coreDll
-          flutter build windows --release
+          flutter build windows --release --build-name $env:MIRQUOVA_BUILD_NAME --build-number $env:MIRQUOVA_BUILD_NUMBER
       - name: Package Windows ZIP
         shell: powershell
         run: |
@@ -56,8 +110,12 @@ jobs:
 
   android:
     name: Build Android APK
+    needs: version
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      MIRQUOVA_BUILD_NAME: ${{ needs.version.outputs.build_name }}
+      MIRQUOVA_BUILD_NUMBER: ${{ needs.version.outputs.build_number }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -70,7 +128,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: '1.99.1'
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android,x86_64-linux-android
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.47.8'
@@ -81,13 +139,13 @@ jobs:
           cargo install cargo-ndk --version 4.1.2 --locked
       - name: Build native Rust Android core
         run: |
-          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" cargo ndk -t arm64-v8a --platform 24 -o apps/mirquova_flutter/android/app/src/main/jniLibs build --lib --release --locked
+          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" cargo ndk -t arm64-v8a -t x86_64 --platform 24 -o apps/mirquova_flutter/android/app/src/main/jniLibs build --lib --release --locked
       - name: Get Flutter dependencies
         working-directory: apps/mirquova_flutter
         run: flutter pub get --enforce-lockfile
       - name: Build Flutter Android APK
         working-directory: apps/mirquova_flutter
-        run: flutter build apk --debug --target-platform android-arm64
+        run: flutter build apk --debug --build-name "$MIRQUOVA_BUILD_NAME" --build-number "$MIRQUOVA_BUILD_NUMBER" --target-platform android-arm64,android-x64
       - name: Copy Android APK
         run: cp apps/mirquova_flutter/build/app/outputs/flutter-apk/app-debug.apk Mirquova-preview-android-arm64-debug.apk
       - name: Upload Android Artifact
@@ -96,38 +154,14 @@ jobs:
           name: android-release
           path: Mirquova-preview-android-arm64-debug.apk
 
-  macos:
-    name: Build macOS Release Package
-    runs-on: macos-15
-    timeout-minutes: 45
-    env:
-      MIRQUOVA_GOLDEN_PROFILE: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: '1.99.1'
-          targets: aarch64-apple-darwin
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.47.8'
-          channel: stable
-          cache: true
-      - name: Build and verify macOS app bundle
-        run: bash scripts/Build-macOS.sh
-      - name: Upload macOS Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-release
-          path: |
-            artifacts/iteration-04/Mirquova-preview-macos-arm64.zip
-            artifacts/iteration-04/Mirquova-preview-macos-arm64.sha256
-          if-no-files-found: error
-
   linux:
     name: Build Linux Release Package
+    needs: version
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      MIRQUOVA_BUILD_NAME: ${{ needs.version.outputs.build_name }}
+      MIRQUOVA_BUILD_NUMBER: ${{ needs.version.outputs.build_number }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -159,51 +193,9 @@ jobs:
             Mirquova-preview-linux-x64.sha256
           if-no-files-found: error
 
-  ios:
-    name: Build iOS Unsigned Device App
-    runs-on: macos-15
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: '1.99.1'
-          targets: aarch64-apple-ios
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.47.8'
-          channel: stable
-          cache: true
-      - name: Build unsigned iOS app and verify Rust ABI exports
-        run: bash scripts/Build-iOS.sh device
-      - name: Package iOS device app with notices
-        run: |
-          mkdir -p artifacts/Mirquova-ios-arm64-unsigned
-          ditto apps/mirquova_flutter/build/ios/iphoneos/Runner.app artifacts/Mirquova-ios-arm64-unsigned/Runner.app
-          cp THIRD_PARTY_NOTICES.md artifacts/Mirquova-ios-arm64-unsigned/
-          ditto third_party artifacts/Mirquova-ios-arm64-unsigned/third_party
-          cat > artifacts/Mirquova-ios-arm64-unsigned/README.txt <<'TXT'
-          Unsigned Mirquova iOS ARM64 device app for development.
-          This ZIP is not an installable IPA or a simulator build.
-          Device installation requires Apple signing and a provisioning profile.
-          LAN discovery additionally requires Apple's approved multicast entitlement
-          and local-network permission. No physical iPhone testing is claimed.
-          See docs/build-and-run.md in the source repository for signed IPA builds.
-          TXT
-          ditto -c -k --keepParent artifacts/Mirquova-ios-arm64-unsigned Mirquova-preview-ios-arm64-unsigned.zip
-          shasum -a 256 Mirquova-preview-ios-arm64-unsigned.zip > Mirquova-preview-ios-arm64-unsigned.sha256
-      - name: Upload iOS Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-release
-          path: |
-            Mirquova-preview-ios-arm64-unsigned.zip
-            Mirquova-preview-ios-arm64-unsigned.sha256
-          if-no-files-found: error
-
   publish:
     name: Publish GitHub Release
-    needs: [windows, android, macos, linux, ios]
+    needs: [version, windows, android, linux]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -216,60 +208,34 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: android-release
-      - name: Download macOS package
-        uses: actions/download-artifact@v4
-        with:
-          name: macos-release
       - name: Download Linux package
         uses: actions/download-artifact@v4
         with:
           name: linux-release
-      - name: Download iOS package
-        uses: actions/download-artifact@v4
-        with:
-          name: ios-release
-      - name: Determine tag name
-        id: release_tag
-        env:
-          REQUESTED_TAG: ${{ github.event.inputs.tag_name }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          tag="${REQUESTED_TAG:-$REF_NAME}"
-          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?$ ]]; then
-            echo 'Expected a stable release tag such as v0.3.0 or v0.3.0+3.' >&2
-            exit 1
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.release_tag.outputs.tag }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
           cat > release-notes.md <<'TXT'
           ### Mirquova development preview
 
           #### Downloads
           - **Windows (x64)**: Extract `Mirquova-preview-windows-x64.zip` completely and run `mirquova.exe`. Keep all bundled files together.
-          - **Android (ARM64)**: Install `Mirquova-preview-android-arm64-debug.apk`. This is a debug-signed phone preview.
-          - **macOS (Apple Silicon)**: Extract `Mirquova-preview-macos-arm64.zip` and move `mirquova.app` to Applications. If Apple cannot verify the app, click **Done**, then **System Settings → Privacy & Security → Open Anyway** for mirquova and confirm **Open**. The preview is signed ad hoc and is not notarized. Intel Macs are not supported by this package.
+          - **Android**: Install `Mirquova-preview-android-arm64-debug.apk`. It contains ARM64 and x64 code and is a debug-signed phone preview. It is not a TV app.
           - **Linux (x64)**: Extract `Mirquova-preview-linux-x64.tar.gz`, keep the entire bundle together, and run `./mirquova`. Built on Ubuntu 24.04; requires GTK3 and compatible system libraries.
-          - **iOS (ARM64)**: `Mirquova-preview-ios-arm64-unsigned.zip` contains an unsigned device app for development. It is not an installable IPA. Apple signing/provisioning and multicast entitlement approval are required for device discovery builds; see the source build instructions.
 
           #### Notes
-          - For this trusted macOS preview only, an alternative is to run `xattr -dr com.apple.quarantine /Applications/mirquova.app` followed by `open /Applications/mirquova.app` in Terminal. This removes quarantine only from this app; it does not notarize it or disable Gatekeeper globally. Changing the archive format does not resolve notarization.
-          - Preview functionality includes consented LAN presence and discovery of unverified candidates. Pairing is implemented as a short-lived, fingerprint-confirmed TLS preview with host approval, but has not passed cross-device QA. Transfers, casting and playback remain unavailable.
-          - Native builds do not establish physical-device installation, permission behavior or two-device pairing. Production signing and distribution QA remain pending.
-          - macOS, Linux and iOS packages include third-party notices and adjacent SHA-256 checksum files.
+          - iOS and macOS packages are not part of this release.
+          - Preview functionality includes consented LAN presence and discovery of unverified candidates. Pairing is a short-lived, fingerprint-confirmed TLS preview with host approval, and has not passed cross-device QA.
+          - Native builds do not establish physical-device installation, permission behavior, or two-device pairing. Production signing and distribution QA remain pending.
+          - Linux packages include third-party notices and an adjacent SHA-256 checksum file.
           TXT
           gh release create "$TAG" \
             Mirquova-preview-windows-x64.zip \
             Mirquova-preview-android-arm64-debug.apk \
-            Mirquova-preview-macos-arm64.zip \
-            Mirquova-preview-macos-arm64.sha256 \
             Mirquova-preview-linux-x64.tar.gz \
             Mirquova-preview-linux-x64.sha256 \
-            Mirquova-preview-ios-arm64-unsigned.zip \
-            Mirquova-preview-ios-arm64-unsigned.sha256 \
             --target "$GITHUB_SHA" \
             --title "Mirquova Preview $TAG" \
             --notes-file release-notes.md

@@ -21,7 +21,8 @@ class NativePackagePlatform implements PackagePlatform {
   String? get packageName => switch (Abi.current()) {
     Abi.windowsX64 => 'Mirquova-preview-windows-x64.zip',
     Abi.macosArm64 => 'Mirquova-preview-macos-arm64.zip',
-    Abi.androidArm64 => 'Mirquova-preview-android-arm64-debug.apk',
+    Abi.androidArm64 ||
+    Abi.androidX64 => 'Mirquova-preview-android-arm64-debug.apk',
     Abi.linuxX64 => 'Mirquova-preview-linux-x64.tar.gz',
     Abi.linuxArm64 => 'Mirquova-preview-linux-arm64.tar.gz',
     _ => null,
@@ -282,6 +283,11 @@ class PackageUpdates extends ChangeNotifier {
       if (_disposed) return;
       status = PackageStatus.ready;
       message = 'Package opened. Follow the system installation steps.';
+    } on PlatformException catch (error) {
+      if (!_disposed) {
+        status = PackageStatus.ready;
+        message = error.message ?? 'Could not open the package.';
+      }
     } catch (error) {
       if (!_disposed) {
         status = PackageStatus.ready;

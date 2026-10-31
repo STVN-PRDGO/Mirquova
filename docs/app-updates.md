@@ -30,7 +30,7 @@ The adapter reads GitHub release asset `name`, `state`, `size`, `digest` and `br
 | --- | --- | --- |
 | Windows x64 | `Mirquova-preview-windows-x64.zip` | System archive handler; close Mirquova and replace the complete portable app folder |
 | macOS ARM64 | `Mirquova-preview-macos-arm64.zip` | System archive handler; close Mirquova and replace the app bundle; Gatekeeper/notarization rules still apply |
-| Android ARM64 | `Mirquova-preview-android-arm64-debug.apk` | System APK installer after explicit user approval |
+| Android ARM64 and x64 | `Mirquova-preview-android-arm64-debug.apk` | System APK installer after explicit user approval |
 | Linux x64 / ARM64 | `Mirquova-preview-linux-x64.tar.gz` / `Mirquova-preview-linux-arm64.tar.gz` | System archive handler; replace the complete bundle; publishers must package these assets explicitly |
 | iOS / other architectures | None in this preview | Use the installation provider; no unsupported IPA installation is offered |
 
@@ -38,7 +38,7 @@ Downloads accept at most three HTTPS redirects, only on `github.com`, `release-a
 
 SHA-256 is supplied by Dart's maintained `crypto` package. It detects corruption relative to release metadata; it is not independent publisher authentication or a replacement for platform signing. Before opening, the file is checked again. Native handlers independently restrict handoff to expected package names in the app's update staging directory; they never execute shell command strings or open arbitrary paths. Desktop archives are opened, not silently applied. Android also checks the package ID, signing certificates and increasing version code, grants read access only through a restricted FileProvider, and uses the system's installation permission/confirmation screens. If installation permission is missing, grant it in Settings and press **Update** again. A verified package already on disk is opened without downloading it again. The `REQUEST_INSTALL_PACKAGES` permission is specific to this sideloaded preview; any future store distribution needs a separate policy/distribution review.
 
-Publish compatible packages to the stable release with GitHub-generated digests. Android updates must retain the same application identity and signing key with an increasing package version code; independently generated debug keys will not update one another. A Windows/macOS/Linux package must contain the whole application bundle and its Rust library, Flutter runtime, data and notices. Existing previews and fixtures are not signed production releases. Production signing, automatic desktop replacement, rollback and physical installation QA remain open.
+A push to `main` publishes the next patch release for Windows, Android, and Linux. iOS and macOS packages are paused. Publish those packages with GitHub-generated digests. Android updates must retain the same application identity and signing key with an increasing package version code; independently generated debug keys will not update one another. A Windows/macOS/Linux package must contain the whole application bundle and its Rust library, Flutter runtime, data and notices. Existing previews and fixtures are not signed production releases. Production signing, automatic desktop replacement, rollback and physical installation QA remain open.
 
 ## Verification
 
