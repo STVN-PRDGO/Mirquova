@@ -213,15 +213,17 @@ void main() {
       await tester.ensureVisible(find.text('Pair').first);
       await tester.tap(find.text('Pair').first);
     }
-    await _settle(tester);
+    // Scanning starts by itself and the sonar keeps scheduling frames, so
+    // pumpAndSettle would wait until its timeout. A few frames are enough.
+    await _until(tester, find.text('Stop'));
     expect(find.text('Pair devices'), findsOneWidget);
-    expect(find.text('Scan'), findsOneWidget);
+    expect(find.text('Stop'), findsOneWidget);
     expect(find.text('Invitation text'), findsNothing);
     debugPrint('[native-pairing-smoke] Pair route loaded');
 
     if (find.byTooltip('Open navigation menu').evaluate().isNotEmpty) {
       await tester.tap(find.byTooltip('Open navigation menu'));
-      await _settle(tester);
+      await _until(tester, find.text('Settings'));
       await tester.ensureVisible(
         find.descendant(
           of: find.byType(Drawer),
@@ -290,6 +292,12 @@ Future<void> _settle(WidgetTester tester) => tester.pumpAndSettle(
   EnginePhase.sendSemanticsUpdate,
   const Duration(seconds: 30),
 );
+
+Future<void> _until(WidgetTester tester, Finder finder) async {
+  for (var i = 0; i < 50 && finder.evaluate().isEmpty; i++) {
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+}
 
 String _encodeHex(List<int> bytes) =>
     bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
