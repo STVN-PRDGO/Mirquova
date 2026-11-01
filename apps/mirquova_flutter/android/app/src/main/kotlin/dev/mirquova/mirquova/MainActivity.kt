@@ -1,13 +1,17 @@
 package dev.mirquova.mirquova
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import java.io.File
@@ -17,6 +21,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var captureReply: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -77,14 +82,49 @@ class MainActivity : FlutterActivity() {
                         result.success(named?.takeIf { it.isNotBlank() } ?: model)
                     }
                     "getReceiveDirectory" -> {
-                        val shared = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            @Suppress("DEPRECATION")
-                            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Mirquova")
-                        } else null
-                        val appOwned = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let { File(it, "Mirquova") }
-                        val folder = listOfNotNull(shared, appOwned).firstOrNull { writable(it) }
+                        // Native Rust writes cannot use public Downloads on
+                        // scoped storage: Java mkdir can succeed and still
+                        // refuse the `.mqpart` inbox file.
+                        val folder = appReceiveDirectory()
                         if (folder != null) result.success(folder.canonicalPath)
                         else result.error("storage_unavailable", "No folder is available for received files.", null)
+                    }
+                    "publishReceivedFiles" -> {
+                        val arguments = call.arguments as? Map<*, *>
+                        val directory = (arguments?.get("directory") as? String)?.let(::File)
+                        val names = arguments?.get("names") as? List<*>
+                        if (directory == null || names.isNullOrEmpty()) {
+                            result.error("invalid_input", "Received files could not be published.", null)
+                        } else {
+                            val published = names.mapNotNull { name ->
+                                val fileName = name as? String ?: return@mapNotNull null
+                                publishReceivedFile(directory, fileName)
+                            }
+                            result.success(
+                                if (published.isNotEmpty()) "Downloads/Mirquova" else directory.canonicalPath
+                            )
+                        }
+                    }
+                    "startScreenCapture" -> {
+                        if (CastCapture.isRunning()) {
+                            result.success(true)
+                        } else if (captureReply != null) {
+                            result.error("busy", "A screen-capture prompt is already open.", null)
+                        } else {
+                            val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                            captureReply = result
+                            startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_CAST)
+                        }
+                    }
+                    "captureFrame" -> {
+                        val frame = CastCapture.latestFrame()
+                        if (frame == null) result.success(null)
+                        else result.success(frame)
+                    }
+                    "stopScreenCapture" -> {
+                        stopService(Intent(this, CastCaptureService::class.java).setAction(CastCaptureService.ACTION_STOP))
+                        CastCapture.stop()
+                        result.success(null)
                     }
                     "getUpdateDirectory" -> {
                         val root = File(cacheDir, "mirquova-updates")
@@ -153,6 +193,14 @@ class MainActivity : FlutterActivity() {
             }
     }
 
+    private fun appReceiveDirectory(): File? {
+        val candidates = listOfNotNull(
+            getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let { File(it, "Mirquova") },
+            File(filesDir, "Mirquova"),
+        )
+        return candidates.firstOrNull { writable(it) }
+    }
+
     // Scoped storage can list a folder as writable and still refuse new files.
     private fun writable(folder: File): Boolean = try {
         (folder.isDirectory || folder.mkdirs()) &&
@@ -163,10 +211,70 @@ class MainActivity : FlutterActivity() {
         false
     }
 
+    /// Copies a verified inbox file into the public Downloads collection so it
+    /// appears next to other downloads. The native session already saved it.
+    private fun publishReceivedFile(directory: File, name: String): Boolean {
+        if (name.isEmpty() || name.contains('/') || name.contains('\\') || name == "." || name == "..") {
+            return false
+        }
+        val source = File(directory, name).canonicalFile
+        if (source.parentFile?.canonicalFile != directory.canonicalFile || !source.isFile) {
+            return false
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Mirquova")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
+        return try {
+            contentResolver.openOutputStream(uri)?.use { output ->
+                source.inputStream().use { input -> input.copyTo(output) }
+            } ?: return false
+            values.clear()
+            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            contentResolver.update(uri, values, null, null)
+            true
+        } catch (_: Exception) {
+            contentResolver.delete(uri, null, null)
+            false
+        }
+    }
+
     private fun releaseMulticast() {
         multicastLock?.let { if (it.isHeld) it.release() }
         multicastLock = null
     }
+    @Deprecated("Required for MediaProjection until the Activity Result API is wired.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_CAST) return
+        val reply = captureReply ?: return
+        captureReply = null
+        if (resultCode != Activity.RESULT_OK || data == null) {
+            reply.success(false)
+            return
+        }
+        val service = Intent(this, CastCaptureService::class.java)
+            .putExtra(CastCaptureService.EXTRA_RESULT_CODE, resultCode)
+            .putExtra(CastCaptureService.EXTRA_RESULT_DATA, data)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(service)
+        } else {
+            startService(service)
+        }
+        reply.success(true)
+    }
+
     override fun onStop() { releaseMulticast(); super.onStop() }
-    override fun onDestroy() { releaseMulticast(); super.onDestroy() }
+    override fun onDestroy() {
+        captureReply = null
+        releaseMulticast()
+        super.onDestroy()
+    }
+
+    companion object {
+        private const val REQUEST_CAST = 40734
+    }
 }

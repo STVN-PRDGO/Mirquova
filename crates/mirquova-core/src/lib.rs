@@ -1,4 +1,5 @@
-//! Local discovery and authenticated pairing foundations; no transfer listener.
+//! Local discovery, pairing, transfer and app-to-app screen share.
+pub mod cast;
 pub mod discovery;
 pub mod ffi;
 pub mod invitation;

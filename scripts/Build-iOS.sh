@@ -43,8 +43,17 @@ for name in ['mq_abi_version', 'mq_discovery_start', 'mq_discovery_stop',
              'mq_pairing_identity_free', 'mq_pairing_identity_validate',
              'mq_pairing_host_start', 'mq_pairing_join',
              'mq_pairing_approve', 'mq_pairing_reject',
-             'mq_pairing_snapshot', 'mq_pairing_stop']:
+             'mq_pairing_snapshot', 'mq_pairing_stop',
+             'mq_transfer_receive_start', 'mq_transfer_send_start',
+             'mq_transfer_approve', 'mq_transfer_reject',
+             'mq_transfer_receive_snapshot', 'mq_transfer_send_snapshot',
+             'mq_transfer_receive_stop', 'mq_transfer_send_stop',
+             'mq_transfer_stop', 'mq_cast_receive_start', 'mq_cast_send_start',
+             'mq_cast_approve', 'mq_cast_reject', 'mq_cast_receive_snapshot',
+             'mq_cast_send_snapshot', 'mq_cast_push_frame',
+             'mq_cast_latest_frame', 'mq_bytes_free', 'mq_cast_receive_stop',
+             'mq_cast_send_stop', 'mq_cast_stop']:
     if '_' + name not in exports:
         raise SystemExit('Missing iOS native ABI export: ' + name)
-print('PASS all sixteen Rust discovery and pairing ABI exports are linked into the iOS app.')
+print('PASS all Rust discovery, pairing, transfer and cast ABI exports are linked into the iOS app.')
 PY

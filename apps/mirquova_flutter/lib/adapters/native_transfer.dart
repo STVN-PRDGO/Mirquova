@@ -194,6 +194,26 @@ Future<String> localDeviceName() async {
   return Platform.localHostname;
 }
 
+/// Copies received files into the system Downloads folder when the native
+/// inbox is app-private storage. The native session never writes there.
+Future<String> publishReceivedFiles({
+  required String destination,
+  required List<String> names,
+}) async {
+  if (!Platform.isAndroid || names.isEmpty) return destination;
+  try {
+    final published = await const MethodChannel('dev.mirquova/app')
+        .invokeMethod<String>('publishReceivedFiles', {
+          'directory': destination,
+          'names': names,
+        });
+    if (published != null && published.isNotEmpty) return published;
+  } on Object {
+    // The app inbox still has the verified files.
+  }
+  return destination;
+}
+
 /// Where received files go when the user has not picked a folder.
 Future<String?> defaultReceiveFolder() async {
   if (Platform.isAndroid) {
@@ -361,23 +381,39 @@ class TransferService extends ChangeNotifier {
       incoming.status == TransferStatus.transferring;
 
   Future<String?> _resolveFolder() async {
-    var path = folder;
-    if (path == null) {
-      try {
-        path = await settings.read(folderKey);
-      } on Object {
-        path = null;
-      }
-      path ??= await _defaultFolder();
-    }
-    if (path == null) return null;
+    String? saved;
     try {
-      await Directory(path).create(recursive: true);
+      saved = await settings.read(folderKey);
     } on Object {
-      return null;
+      saved = null;
     }
-    folder = path;
-    return path;
+    final seen = <String>{};
+    for (final path in [folder, saved, await _defaultFolder()]) {
+      if (path == null || path.isEmpty || !seen.add(path)) continue;
+      if (await _ensureWritableDirectory(path)) {
+        folder = path;
+        return path;
+      }
+    }
+    return null;
+  }
+
+  /// Native receive writes with the same filesystem APIs as Dart. A folder
+  /// that exists is not enough: public Downloads on Android can accept a
+  /// Java mkdir and still refuse the `.mqpart` file Rust creates.
+  Future<bool> _ensureWritableDirectory(String path) async {
+    try {
+      final directory = Directory(path);
+      await directory.create(recursive: true);
+      final probe = File(
+        '$path${Platform.pathSeparator}.mqwrite-${DateTime.now().microsecondsSinceEpoch}',
+      );
+      await probe.writeAsBytes(const [1], flush: true);
+      await probe.delete();
+      return true;
+    } on Object {
+      return false;
+    }
   }
 
   Future<void> _arm() async {
@@ -484,11 +520,8 @@ class TransferService extends ChangeNotifier {
     incoming = snapshot;
     if (snapshot.finished) {
       if (snapshot.files.isNotEmpty || incomingPeer != null) {
-        _lastIncoming = IncomingResult(
-          snapshot: snapshot,
-          senderAlias: incomingPeer?.alias ?? 'A paired device',
-          folder: folder ?? '',
-        );
+        unawaited(_finishIncoming(snapshot));
+        return;
       }
       _disarm();
       _notify();
@@ -496,6 +529,25 @@ class TransferService extends ChangeNotifier {
       return;
     }
     if (changed) _notify();
+  }
+
+  Future<void> _finishIncoming(TransferSnapshot snapshot) async {
+    var savedTo = folder ?? '';
+    if (snapshot.status == TransferStatus.completed && savedTo.isNotEmpty) {
+      savedTo = await publishReceivedFiles(
+        destination: savedTo,
+        names: [for (final file in snapshot.files) file.name],
+      );
+    }
+    if (_disposed) return;
+    _lastIncoming = IncomingResult(
+      snapshot: snapshot,
+      senderAlias: incomingPeer?.alias ?? 'A paired device',
+      folder: savedTo,
+    );
+    _disarm();
+    _notify();
+    if (_wanted) unawaited(_arm());
   }
 
   Future<void> _recordAddress(TrustedPeer peer, String address) async {

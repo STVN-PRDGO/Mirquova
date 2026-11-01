@@ -1,5 +1,6 @@
 //! Process-wide discovery/presence ABI v2. No callbacks cross threads or trust boundary.
 use crate::{
+    cast::{CastSnapshot, ReceiveSession as CastReceiveSession, SendSession as CastSendSession},
     discovery::Discovery,
     pairing::PairingIdentity,
     pairing_transport::{HostSession, JoinSession, PairingSnapshot},
@@ -66,6 +67,17 @@ struct TransferRuntime {
 fn transfer_runtime() -> &'static Mutex<TransferRuntime> {
     static INSTANCE: OnceLock<Mutex<TransferRuntime>> = OnceLock::new();
     INSTANCE.get_or_init(|| Mutex::new(TransferRuntime::default()))
+}
+
+#[derive(Default)]
+struct CastRuntime {
+    receive: Option<CastReceiveSession>,
+    send: Option<CastSendSession>,
+}
+
+fn cast_runtime() -> &'static Mutex<CastRuntime> {
+    static INSTANCE: OnceLock<Mutex<CastRuntime>> = OnceLock::new();
+    INSTANCE.get_or_init(|| Mutex::new(CastRuntime::default()))
 }
 
 #[unsafe(no_mangle)]
@@ -350,6 +362,22 @@ struct SendStartConfig {
     paths: Vec<String>,
 }
 
+#[derive(serde::Deserialize)]
+struct CastReceiveStartConfig {
+    local_ipv4: String,
+    port: u16,
+    peer_ca_certificates_der_hex: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CastSendStartConfig {
+    peer_ipv4: String,
+    port: u16,
+    peer_ca_certificate_der_hex: String,
+    width: u32,
+    height: u32,
+}
+
 fn read_config<T: serde::de::DeserializeOwned>(bytes: *const u8, length: u32) -> Option<T> {
     if bytes.is_null() || length == 0 || length > 256 * 1024 {
         return None;
@@ -590,6 +618,278 @@ pub extern "C" fn mq_transfer_stop() {
     let _ = std::panic::catch_unwind(|| {
         stop_send();
         stop_receive();
+    });
+}
+
+fn stop_cast_receive() {
+    let previous = cast_runtime()
+        .lock()
+        .ok()
+        .and_then(|mut manager| manager.receive.take());
+    if let Some(mut session) = previous {
+        session.stop();
+    }
+}
+
+fn stop_cast_send() {
+    let previous = cast_runtime()
+        .lock()
+        .ok()
+        .and_then(|mut manager| manager.send.take());
+    if let Some(mut session) = previous {
+        session.stop();
+    }
+}
+
+fn decode_peer_list(hexes: &[String]) -> Option<Vec<Vec<u8>>> {
+    if hexes.is_empty() || hexes.len() > 32 {
+        return None;
+    }
+    let mut peers = Vec::new();
+    for hex in hexes {
+        let certificate = decode_hex(hex)?;
+        if certificate.is_empty() || certificate.len() > 512 {
+            return None;
+        }
+        peers.push(certificate);
+    }
+    Some(peers)
+}
+
+fn cast_snapshot_json(read: impl FnOnce(&CastRuntime) -> Option<CastSnapshot>) -> *mut c_char {
+    let snapshot = cast_runtime()
+        .lock()
+        .ok()
+        .and_then(|manager| read(&manager))
+        .unwrap_or_default();
+    serde_json::to_string(&snapshot)
+        .ok()
+        .and_then(|json| CString::new(json).ok())
+        .map(CString::into_raw)
+        .unwrap_or(ptr::null_mut())
+}
+
+/// # Safety
+/// Pointers must reference their declared readable byte lengths for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mq_cast_receive_start(
+    config_json: *const u8,
+    config_len: u32,
+    certificate_der: *const u8,
+    certificate_len: u32,
+    private_key_pkcs8_der: *const u8,
+    private_key_len: u32,
+) -> i32 {
+    std::panic::catch_unwind(|| {
+        let Some(config) = read_config::<CastReceiveStartConfig>(config_json, config_len) else {
+            return 0;
+        };
+        let Some(identity) = load_identity(
+            certificate_der,
+            certificate_len,
+            private_key_pkcs8_der,
+            private_key_len,
+        ) else {
+            return 0;
+        };
+        let Ok(address) = config.local_ipv4.parse() else {
+            return 0;
+        };
+        let Some(peers) = decode_peer_list(&config.peer_ca_certificates_der_hex) else {
+            return 0;
+        };
+        stop_cast_receive();
+        let Ok(session) = CastReceiveSession::start(address, config.port, identity, &peers) else {
+            return 0;
+        };
+        let Ok(mut manager) = cast_runtime().lock() else {
+            return -1;
+        };
+        manager.receive = Some(session);
+        1
+    })
+    .unwrap_or(-1)
+}
+
+/// # Safety
+/// Pointers must reference their declared readable byte lengths for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mq_cast_send_start(
+    config_json: *const u8,
+    config_len: u32,
+    certificate_der: *const u8,
+    certificate_len: u32,
+    private_key_pkcs8_der: *const u8,
+    private_key_len: u32,
+) -> i32 {
+    std::panic::catch_unwind(|| {
+        let Some(config) = read_config::<CastSendStartConfig>(config_json, config_len) else {
+            return 0;
+        };
+        let Some(identity) = load_identity(
+            certificate_der,
+            certificate_len,
+            private_key_pkcs8_der,
+            private_key_len,
+        ) else {
+            return 0;
+        };
+        let Ok(address) = config.peer_ipv4.parse::<std::net::Ipv4Addr>() else {
+            return 0;
+        };
+        let Some(peer_ca) = decode_hex(&config.peer_ca_certificate_der_hex) else {
+            return 0;
+        };
+        if peer_ca.is_empty() || peer_ca.len() > 512 {
+            return 0;
+        }
+        stop_cast_send();
+        let Ok(session) = CastSendSession::start(
+            address,
+            config.port,
+            identity,
+            &peer_ca,
+            config.width,
+            config.height,
+        ) else {
+            return 0;
+        };
+        let Ok(mut manager) = cast_runtime().lock() else {
+            return -1;
+        };
+        manager.send = Some(session);
+        1
+    })
+    .unwrap_or(-1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_cast_approve() -> i32 {
+    std::panic::catch_unwind(|| {
+        cast_runtime()
+            .lock()
+            .map(|manager| {
+                manager
+                    .receive
+                    .as_ref()
+                    .map_or(0, |session| i32::from(session.approve()))
+            })
+            .unwrap_or(-1)
+    })
+    .unwrap_or(-1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_cast_reject() -> i32 {
+    std::panic::catch_unwind(|| {
+        cast_runtime()
+            .lock()
+            .map(|manager| {
+                manager
+                    .receive
+                    .as_ref()
+                    .map_or(0, |session| i32::from(session.reject()))
+            })
+            .unwrap_or(-1)
+    })
+    .unwrap_or(-1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_cast_receive_snapshot() -> *mut c_char {
+    std::panic::catch_unwind(|| {
+        cast_snapshot_json(|manager| manager.receive.as_ref().map(CastReceiveSession::snapshot))
+    })
+    .unwrap_or(ptr::null_mut())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_cast_send_snapshot() -> *mut c_char {
+    std::panic::catch_unwind(|| {
+        cast_snapshot_json(|manager| manager.send.as_ref().map(CastSendSession::snapshot))
+    })
+    .unwrap_or(ptr::null_mut())
+}
+
+/// # Safety
+/// `jpeg` must reference `jpeg_len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mq_cast_push_frame(jpeg: *const u8, jpeg_len: u32) -> i32 {
+    if jpeg.is_null() || jpeg_len == 0 || jpeg_len > 512 * 1024 {
+        return 0;
+    }
+    std::panic::catch_unwind(|| {
+        let bytes = unsafe { std::slice::from_raw_parts(jpeg, jpeg_len as usize) };
+        cast_runtime()
+            .lock()
+            .map(|manager| {
+                manager
+                    .send
+                    .as_ref()
+                    .map_or(0, |session| i32::from(session.push_frame(bytes)))
+            })
+            .unwrap_or(-1)
+    })
+    .unwrap_or(-1)
+}
+
+/// # Safety
+/// `length` must be writable. Free the returned buffer with `mq_bytes_free`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mq_cast_latest_frame(length: *mut u32) -> *mut u8 {
+    if length.is_null() {
+        return ptr::null_mut();
+    }
+    std::panic::catch_unwind(|| {
+        let frame = cast_runtime().lock().ok().and_then(|manager| {
+            manager
+                .receive
+                .as_ref()
+                .and_then(CastReceiveSession::latest_frame)
+        });
+        match frame {
+            Some(bytes) if !bytes.is_empty() => {
+                unsafe {
+                    *length = bytes.len() as u32;
+                }
+                let mut boxed = bytes.into_boxed_slice();
+                let pointer = boxed.as_mut_ptr();
+                std::mem::forget(boxed);
+                pointer
+            }
+            _ => {
+                unsafe {
+                    *length = 0;
+                }
+                ptr::null_mut()
+            }
+        }
+    })
+    .unwrap_or(ptr::null_mut())
+}
+
+/// # Safety
+/// `value` must be null or an unfreed pointer returned by `mq_cast_latest_frame`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mq_bytes_free(value: *mut u8, length: u32) {
+    unsafe { zeroize_boxed_bytes(value, length) }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_cast_receive_stop() {
+    let _ = std::panic::catch_unwind(stop_cast_receive);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_cast_send_stop() {
+    let _ = std::panic::catch_unwind(stop_cast_send);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_cast_stop() {
+    let _ = std::panic::catch_unwind(|| {
+        stop_cast_send();
+        stop_cast_receive();
     });
 }
 

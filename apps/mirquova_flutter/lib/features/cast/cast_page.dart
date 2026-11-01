@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
 
-import '../../core/discovery_port.dart';
+import '../../adapters/native_cast.dart';
+import '../../adapters/pairing_identity.dart';
+import '../../core/cast_state.dart';
 import '../../ui/surface_card.dart';
 
 class CastPage extends StatefulWidget {
   const CastPage({
     super.key,
-    required this.discovery,
+    required this.service,
+    required this.onOpenPair,
     required this.onOpenDevices,
     required this.onOpenRemote,
   });
 
-  final DiscoveryPort discovery;
+  final CastService? service;
+  final VoidCallback onOpenPair;
   final VoidCallback onOpenDevices;
   final VoidCallback onOpenRemote;
 
@@ -21,58 +25,111 @@ class CastPage extends StatefulWidget {
 
 class _CastPageState extends State<CastPage> {
   bool _mirror = true;
-  String? _result;
 
-  void _start() {
-    setState(() {
-      _result = 'Screen capture is not part of this build. Nothing was captured and no device was contacted.';
-    });
+  @override
+  void initState() {
+    super.initState();
+    widget.service?.reloadPeers();
+  }
+
+  Future<void> _start(TrustedPeer peer) async {
+    final service = widget.service;
+    if (service == null || service.sending) return;
+    await service.startCast(peer: peer);
   }
 
   @override
   Widget build(BuildContext context) {
+    final service = widget.service;
+    const header = PageHeader(
+      title: 'Screen casting',
+      subtitle: 'Share this screen with a paired Mirquova device. The other device accepts before anything is shown.',
+    );
+    if (service == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          const SizedBox(height: 16),
+          EmptyPanel(
+            icon: Icons.error_outline,
+            title: 'Screen casting is unavailable',
+            message: 'This build does not include the Mirquova native core. Install the full app package.',
+            action: OutlinedButton(
+              onPressed: widget.onOpenDevices,
+              child: const Text('Open devices'),
+            ),
+          ),
+        ],
+      );
+    }
     return ListenableBuilder(
-      listenable: widget.discovery,
+      listenable: service,
       builder: (context, _) {
-        final snapshot = widget.discovery.snapshot;
+        final outgoing = service.outgoing;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const PageHeader(
-              title: 'Screen casting',
-              subtitle: 'Cast to a Mirquova receiver on your LAN. Screen capture permission is requested only when casting can actually start.',
+            header,
+            const SizedBox(height: 16),
+            _ReceiveStatus(service: service),
+            const SizedBox(height: 16),
+            _Controls(
+              mirror: _mirror,
+              supported: service.captureSupported,
+              sending: service.sending,
+              onMirror: (value) => setState(() => _mirror = value),
+              onOpenRemote: widget.onOpenRemote,
+              onStop: service.stopOutgoing,
+              snapshot: outgoing,
+              message: service.sendMessage,
             ),
             const SizedBox(height: 20),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final stacked = constraints.maxWidth < 760;
-                final controls = _Controls(
-                  mirror: _mirror,
-                  onMirror: (value) => setState(() => _mirror = value),
-                  onOpenRemote: widget.onOpenRemote,
-                  onStart: _start,
-                  result: _result,
-                );
-                final receivers = _Receivers(
-                  snapshot: snapshot,
-                  onOpenDevices: widget.onOpenDevices,
-                );
-                if (stacked) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [controls, const SizedBox(height: 16), receivers],
-                  );
-                }
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            if (service.peers.isEmpty)
+              EmptyPanel(
+                icon: Icons.devices_other_outlined,
+                title: 'No paired devices yet',
+                message: 'Pair once, then tap a device here. A discovered name is not a cast target until it is paired.',
+                action: Wrap(
+                  spacing: 8,
                   children: [
-                    Expanded(flex: 3, child: controls),
-                    const SizedBox(width: 16),
-                    Expanded(flex: 2, child: receivers),
+                    FilledButton.icon(
+                      onPressed: widget.onOpenPair,
+                      icon: const Icon(Icons.radar_outlined),
+                      label: const Text('Pair a device'),
+                    ),
+                    OutlinedButton(
+                      onPressed: widget.onOpenDevices,
+                      child: const Text('Open devices'),
+                    ),
                   ],
-                );
-              },
-            ),
+                ),
+              )
+            else ...[
+              Text(
+                service.sending
+                    ? 'Sharing to'
+                    : 'Tap a device to share this screen',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  for (final peer in service.peers)
+                    _DeviceTile(
+                      peer: peer,
+                      enabled: !service.sending && service.captureSupported,
+                      active:
+                          service.outgoingPeer?.fingerprintSha256 ==
+                          peer.fingerprintSha256,
+                      onTap: () => _start(peer),
+                    ),
+                  _AddDeviceTile(onTap: widget.onOpenPair),
+                ],
+              ),
+            ],
           ],
         );
       },
@@ -80,41 +137,101 @@ class _CastPageState extends State<CastPage> {
   }
 }
 
-class _Controls extends StatelessWidget {
-  const _Controls({
-    required this.mirror,
-    required this.onMirror,
-    required this.onOpenRemote,
-    required this.onStart,
-    required this.result,
-  });
+class _ReceiveStatus extends StatelessWidget {
+  const _ReceiveStatus({required this.service});
 
-  final bool mirror;
-  final ValueChanged<bool> onMirror;
-  final VoidCallback onOpenRemote;
-  final VoidCallback onStart;
-  final String? result;
+  final CastService service;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final problem = service.receiveProblem;
+    final ready = service.receiving && problem == null;
+    final color = problem != null
+        ? colors.error
+        : ready
+        ? Colors.green.shade600
+        : colors.onSurfaceVariant;
+    final label =
+        problem ??
+        (ready
+            ? 'Ready to receive a screen share from paired devices'
+            : service.peers.isEmpty
+            ? 'Pair a device to receive a screen share'
+            : 'Starting…');
+    return SurfaceCard(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Icon(
+            ready ? Icons.cast_connected : Icons.cast_outlined,
+            color: color,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(color: color, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Controls extends StatelessWidget {
+  const _Controls({
+    required this.mirror,
+    required this.supported,
+    required this.sending,
+    required this.onMirror,
+    required this.onOpenRemote,
+    required this.onStop,
+    required this.snapshot,
+    required this.message,
+  });
+
+  final bool mirror;
+  final bool supported;
+  final bool sending;
+  final ValueChanged<bool> onMirror;
+  final VoidCallback onOpenRemote;
+  final VoidCallback onStop;
+  final CastSnapshot snapshot;
+  final String? message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final live = snapshot.status == CastStatus.casting;
     return SurfaceCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const StatusChip(
-            label: 'Not casting',
-            color: Color(0xFF71819A),
-            icon: Icons.cast_outlined,
+          StatusChip(
+            label: live
+                ? 'Sharing this screen'
+                : snapshot.status == CastStatus.awaitingApproval
+                ? 'Waiting for approval'
+                : snapshot.status == CastStatus.connecting
+                ? 'Connecting'
+                : 'Not sharing',
+            color: live ? const Color(0xFF3DDC97) : const Color(0xFF71819A),
+            icon: live ? Icons.cast_connected : Icons.cast_outlined,
           ),
           const SizedBox(height: 16),
           Text(
-            'No receiver selected',
+            supported
+                ? 'Mirquova-to-Mirquova screen share'
+                : 'Screen capture is not available on this device',
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: 8),
-          const Text(
-            'A discovered name is not a confirmed receiver. Starting a cast checks that capture is available and does not contact a device when it is not.',
+          Text(
+            supported
+                ? 'This shares JPEG frames of this screen over the same trusted pairing used for files. It is not Chromecast or Miracast.'
+                : 'This build can still receive a screen share from a Windows or Android device that is paired here.',
           ),
           const SizedBox(height: 16),
           SingleChildScrollView(
@@ -133,29 +250,38 @@ class _Controls extends StatelessWidget {
                 ),
               ],
               selected: {mirror},
-              onSelectionChanged: (value) => onMirror(value.first),
+              onSelectionChanged: sending
+                  ? null
+                  : (value) => onMirror(value.first),
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            mirror ? 'Full-screen mirror stays off until a session exists.' : 'Media casting stays off until playback and a receiver session exist.',
+            mirror
+                ? 'The whole screen is shared after the other device accepts.'
+                : 'Media casting in this build still shares the screen, including the player if it is open.',
             style: TextStyle(color: colors.onSurfaceVariant),
           ),
+          if (sending || message != null) ...[
+            const SizedBox(height: 16),
+            if (sending) const LinearProgressIndicator(),
+            if (message != null) ...[const SizedBox(height: 8), Text(message!)],
+          ],
           const SizedBox(height: 20),
-          const _LinkGraphic(),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: onStart,
-              icon: const Icon(Icons.cast_outlined),
-              label: const Text('Start casting'),
+          if (sending)
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onStop,
+                icon: const Icon(Icons.stop_circle_outlined),
+                label: const Text('Stop sharing'),
+              ),
+            )
+          else
+            Text(
+              supported ? 'Choose a paired device below to start.' : 'Pair a Windows or Android device, then accept when it shares here.',
+              style: TextStyle(color: colors.onSurfaceVariant),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            result ?? 'Start casting checks this device. It does not begin a session by itself.',
-          ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: onOpenRemote,
@@ -168,90 +294,98 @@ class _Controls extends StatelessWidget {
   }
 }
 
-class _LinkGraphic extends StatelessWidget {
-  const _LinkGraphic();
+class _DeviceTile extends StatelessWidget {
+  const _DeviceTile({
+    required this.peer,
+    required this.enabled,
+    required this.active,
+    required this.onTap,
+  });
+
+  final TrustedPeer peer;
+  final bool enabled;
+  final bool active;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return ExcludeSemantics(
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.laptop_outlined, size: 42, color: colors.primary),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Divider(color: colors.secondary),
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: 'Share screen to ${peer.alias}',
+      child: Material(
+        color: active ? colors.primaryContainer : colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: enabled ? onTap : null,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 200),
+            opacity: enabled || active ? 1 : 0.55,
+            child: SizedBox(
+              width: 132,
+              height: 120,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: colors.primary,
+                    foregroundColor: colors.onPrimary,
+                    child: const Icon(Icons.cast_outlined),
+                  ),
+                  const SizedBox(height: 10),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      peer.alias,
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          Icon(Icons.tv_outlined, size: 48, color: colors.secondary),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _Receivers extends StatelessWidget {
-  const _Receivers({required this.snapshot, required this.onOpenDevices});
+class _AddDeviceTile extends StatelessWidget {
+  const _AddDeviceTile({required this.onTap});
 
-  final DiscoverySnapshot snapshot;
-  final VoidCallback onOpenDevices;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Available devices',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Listed devices were seen on the LAN. They are not cast targets yet.',
-        ),
-        const SizedBox(height: 12),
-        if (snapshot.peers.isEmpty)
-          EmptyPanel(
-            icon: Icons.tv_off_outlined,
-            title: 'No receiver found',
-            message: snapshot.status == DiscoveryStatus.scanning
-                ? 'A scan is running. Results stay unverified.'
-                : 'Open Devices to scan this LAN. An empty list is not a failed TV.',
-            action: OutlinedButton(
-              onPressed: onOpenDevices,
-              child: const Text('Open devices'),
-            ),
-          )
-        else
-          for (final peer in snapshot.peers)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: SurfaceCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      peer.name,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    const StatusChip(
-                      label: 'Unverified',
-                      color: Color(0xFFF5B84B),
-                      icon: Icons.help_outline,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        if (snapshot.peers.isNotEmpty)
-          OutlinedButton(
-            onPressed: onOpenDevices,
-            child: const Text('Open devices'),
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: colors.outlineVariant),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: SizedBox(
+          width: 132,
+          height: 120,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.add, size: 28, color: colors.primary),
+              const SizedBox(height: 10),
+              const Text('Pair another'),
+            ],
           ),
-      ],
+        ),
+      ),
     );
   }
 }

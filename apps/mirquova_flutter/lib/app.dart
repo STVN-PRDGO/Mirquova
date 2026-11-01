@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'adapters/auto_update.dart';
 import 'adapters/github_updates.dart';
 import 'adapters/native_app_platform.dart';
+import 'adapters/native_cast.dart';
 import 'adapters/native_transfer.dart';
 import 'adapters/package_updates.dart';
 import 'adapters/pairing_identity.dart';
@@ -16,6 +17,7 @@ import 'core/discovery_port.dart';
 import 'core/playback.dart';
 import 'core/transfer_state.dart';
 import 'features/cast/cast_page.dart';
+import 'features/cast/incoming_cast.dart';
 import 'features/home/home_page.dart';
 import 'features/nearby/nearby_page.dart';
 import 'features/pairing/pairing_page.dart';
@@ -66,7 +68,10 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
   late final AutoUpdate _autoUpdate;
   PairingController? _pairing;
   TransferService? _transfer;
+  CastService? _cast;
   bool _incomingOpen = false;
+  bool _incomingCastOpen = false;
+  bool _incomingCastViewOpen = false;
   final _navigator = GlobalKey<NavigatorState>();
   final _messenger = GlobalKey<ScaffoldMessengerState>();
   final _playback = LocalPlayback();
@@ -84,7 +89,10 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
           ..beforeInstall = _announceInstall;
     WidgetsBinding.instance.addObserver(this);
     unawaited(_loadInstalledVersion());
-    if (widget.enableTransfer) _startTransfer();
+    if (widget.enableTransfer) {
+      _startTransfer();
+      _startCast();
+    }
   }
 
   bool _canInstallUpdate() {
@@ -94,9 +102,13 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
         (transfer.sending ||
             transfer.incomingNeedsAnswer ||
             transfer.incoming.status == TransferStatus.transferring);
+    final casting =
+        _cast != null &&
+        (_cast!.sending || _cast!.incomingNeedsAnswer || _cast!.incomingLive);
     return WidgetsBinding.instance.lifecycleState ==
             AppLifecycleState.resumed &&
-        !transferring;
+        !transferring &&
+        !casting;
   }
 
   void _runAutoUpdate({bool force = false}) {
@@ -146,6 +158,23 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
     }
   }
 
+  void _startCast() {
+    try {
+      final pairingStore = FlutterPairingSecretStore();
+      _cast = CastService(
+        identities: PairingIdentityRepository(
+          api: FfiPairingIdentityApi(),
+          store: pairingStore,
+        ),
+        trustedPeers: PairingTrustRepository(store: pairingStore),
+        discovery: widget.discovery,
+      )..addListener(_onCast);
+      unawaited(_cast!.startReceiving());
+    } on Object {
+      _cast = null;
+    }
+  }
+
   void _onTransfer() {
     final transfer = _transfer;
     if (transfer == null || !mounted) return;
@@ -165,6 +194,39 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
       _messenger.currentState?.showSnackBar(
         SnackBar(content: Text(incomingResultMessage(result))),
       );
+    }
+    if (_autoUpdate.installPending) {
+      unawaited(_autoUpdate.installIfPending(_canInstallUpdate));
+    }
+  }
+
+  void _onCast() {
+    final cast = _cast;
+    if (cast == null || !mounted) return;
+    final context = _navigator.currentContext;
+    if (cast.incomingNeedsAnswer && !_incomingCastOpen && context != null) {
+      _incomingCastOpen = true;
+      unawaited(
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => IncomingCastDialog(service: cast),
+        ).whenComplete(() => _incomingCastOpen = false),
+      );
+    }
+    if (cast.incomingLive && !_incomingCastViewOpen && context != null) {
+      _incomingCastViewOpen = true;
+      unawaited(
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => IncomingCastViewer(service: cast),
+        ).whenComplete(() => _incomingCastViewOpen = false),
+      );
+    }
+    final ended = cast.takeLastIncomingMessage();
+    if (ended != null) {
+      _messenger.currentState?.showSnackBar(SnackBar(content: Text(ended)));
     }
     if (_autoUpdate.installPending) {
       unawaited(_autoUpdate.installIfPending(_canInstallUpdate));
@@ -203,6 +265,7 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(_transfer?.startReceiving());
+      unawaited(_cast?.startReceiving());
       if (_autoUpdate.installPending) {
         unawaited(_autoUpdate.installIfPending(_canInstallUpdate));
       } else {
@@ -218,11 +281,14 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
       final keepReceiving =
           state == AppLifecycleState.hidden &&
           !(Platform.isAndroid || Platform.isIOS) &&
-          (_transfer?.receiving ?? false);
+          (_transfer?.receiving ?? false) &&
+          !(_cast?.sending ?? false) &&
+          !(_cast?.incomingLive ?? false);
       widget.discovery.stop();
       if (!keepReceiving) {
         widget.discovery.hide();
         _transfer?.pauseReceiving();
+        _cast?.pauseReceiving();
       }
       _pairing?.stop();
       unawaited(_playback.stop());
@@ -241,6 +307,8 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
     _pairing?.dispose();
     _transfer?.removeListener(_onTransfer);
     _transfer?.dispose();
+    _cast?.removeListener(_onCast);
+    _cast?.dispose();
     _playback.dispose();
     super.dispose();
   }
@@ -258,7 +326,8 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
       onOpenPair: () => _open(AppSection.pair),
     ),
     AppSection.cast => CastPage(
-      discovery: widget.discovery,
+      service: _cast,
+      onOpenPair: () => _open(AppSection.pair),
       onOpenDevices: () => _open(AppSection.devices),
       onOpenRemote: () => _open(AppSection.remote),
     ),
@@ -298,7 +367,10 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
       return PairingPage(
         controller: _pairingController(),
         discovery: widget.discovery,
-        onTrustChanged: () => unawaited(_transfer?.reloadPeers()),
+        onTrustChanged: () {
+          unawaited(_transfer?.reloadPeers());
+          unawaited(_cast?.reloadPeers());
+        },
         onOpenTransfer: () => _open(AppSection.transfer),
       );
     } on Object catch (error) {

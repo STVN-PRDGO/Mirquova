@@ -70,4 +70,27 @@ void mq_transfer_receive_stop(void);
 void mq_transfer_send_stop(void);
 // Stops both sessions.
 void mq_transfer_stop(void);
+// App-to-app screen share. Same identity/trust rules as transfer. Frames are
+// JPEG stills after mq_cast_approve. 1 started, 0 rejected, -1 failure.
+int32_t mq_cast_receive_start(const uint8_t *config_json, uint32_t config_len,
+                              const uint8_t *certificate_der,
+                              uint32_t certificate_len,
+                              const uint8_t *private_key_pkcs8_der,
+                              uint32_t private_key_len);
+int32_t mq_cast_send_start(const uint8_t *config_json, uint32_t config_len,
+                           const uint8_t *certificate_der,
+                           uint32_t certificate_len,
+                           const uint8_t *private_key_pkcs8_der,
+                           uint32_t private_key_len);
+int32_t mq_cast_approve(void);
+int32_t mq_cast_reject(void);
+char *mq_cast_receive_snapshot(void);
+char *mq_cast_send_snapshot(void);
+int32_t mq_cast_push_frame(const uint8_t *jpeg, uint32_t jpeg_len);
+// Owned JPEG. Free with mq_bytes_free. length is set to 0 when no frame.
+uint8_t *mq_cast_latest_frame(uint32_t *length);
+void mq_bytes_free(uint8_t *value, uint32_t length);
+void mq_cast_receive_stop(void);
+void mq_cast_send_stop(void);
+void mq_cast_stop(void);
 #endif

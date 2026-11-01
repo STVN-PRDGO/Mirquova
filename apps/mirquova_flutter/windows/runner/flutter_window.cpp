@@ -7,8 +7,10 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "screen_capture.h"
 
 namespace {
 
@@ -104,6 +106,14 @@ bool FlutterWindow::OnCreate() {
           if (reinterpret_cast<INT_PTR>(opened) <= 32) {
             result->Error("package_unavailable", "The downloaded package could not be opened.");
           } else { result->Success(); }
+        } else if (call.method_name() == "captureFrame") {
+          const std::vector<uint8_t> jpeg = CaptureScreenJpeg();
+          if (jpeg.empty()) {
+            result->Error("capture_unavailable",
+                          "This screen could not be captured.");
+          } else {
+            result->Success(flutter::EncodableValue(jpeg));
+          }
         } else if (call.method_name() == "openReleasePage") {
           const auto* argument = call.arguments();
           const auto* url = argument ? std::get_if<std::string>(argument) : nullptr;

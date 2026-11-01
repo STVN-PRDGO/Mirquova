@@ -192,7 +192,7 @@ impl ReceiveSession {
             return Err(TransferStartError::InvalidInput);
         }
         let destination = destination.to_path_buf();
-        if !destination.is_dir() {
+        if !destination.is_dir() || !directory_is_writable(&destination) {
             return Err(TransferStartError::InvalidInput);
         }
         let config = identity
@@ -811,11 +811,21 @@ impl TempFile {
 
     fn persist(mut self, final_path: &Path) -> io::Result<()> {
         if let Some(file) = self.file.take() {
-            file.sync_all()?;
+            // Android FUSE/sdcardfs often rejects fsync even after a successful write.
+            let _ = file.sync_all();
         }
-        fs::rename(&self.path, final_path)?;
-        self.keep = true;
-        Ok(())
+        match fs::rename(&self.path, final_path) {
+            Ok(()) => {
+                self.keep = true;
+                Ok(())
+            }
+            Err(_) => {
+                fs::copy(&self.path, final_path)?;
+                let _ = fs::remove_file(&self.path);
+                self.keep = true;
+                Ok(())
+            }
+        }
     }
 }
 
@@ -967,6 +977,17 @@ pub fn sanitize_file_name(name: &str) -> Option<&str> {
     Some(name)
 }
 
+fn directory_is_writable(destination: &Path) -> bool {
+    let probe = destination.join(format!(".mqwrite-{}", Uuid::new_v4()));
+    match File::create(&probe) {
+        Ok(_) => {
+            let _ = fs::remove_file(probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 fn contained_path(root: &Path, name: &str) -> io::Result<PathBuf> {
     let name = sanitize_file_name(name).ok_or_else(invalid_data)?;
     let root = root.canonicalize()?;
@@ -1085,6 +1106,20 @@ mod tests {
     use super::*;
     use std::net::UdpSocket;
     use std::time::Instant;
+
+    #[test]
+    fn persist_keeps_the_file_when_rename_needs_a_copy() {
+        let root = std::env::temp_dir().join(format!("mirquova-persist-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let partial_path = root.join("part.mqpart");
+        let final_path = root.join("kept.txt");
+        let mut partial = TempFile::create(&partial_path).unwrap();
+        partial.write_all(b"saved").unwrap();
+        partial.persist(&final_path).unwrap();
+        assert_eq!(fs::read(&final_path).unwrap(), b"saved");
+        assert!(!partial_path.exists());
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn file_names_reject_traversal_and_reserved_devices() {

@@ -866,8 +866,8 @@ fn read_frame_until(
     let mut chunk = [0; 1024];
     let result = loop {
         if buffered.len() >= 4 {
-            let length = u32::from_be_bytes([buffered[0], buffered[1], buffered[2], buffered[3]])
-                as usize;
+            let length =
+                u32::from_be_bytes([buffered[0], buffered[1], buffered[2], buffered[3]]) as usize;
             if length == 0 || length > MAX_PAIRING_MESSAGE_BYTES {
                 break Err(io::Error::new(
                     io::ErrorKind::InvalidData,
