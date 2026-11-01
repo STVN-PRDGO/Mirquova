@@ -54,7 +54,7 @@ void main() {
     await tester.pumpWidget(
       MediaQuery(
         data: MediaQueryData(size: size, textScaler: TextScaler.linear(scale)),
-        child: MirquovaApp(discovery: port),
+        child: MirquovaApp(discovery: port, showIntro: false),
       ),
     );
     await tester.pump();
@@ -151,15 +151,15 @@ void main() {
         await tester.tap(find.text('Transfer').first);
       }
       await tester.pumpAndSettle();
-      expect(find.text('Select files'), findsOneWidget);
+      expect(find.text('Send files'), findsOneWidget);
+      // Without a bundled core the page says so; with one and no paired
+      // device it offers pairing. Either way there is no Receive mode.
       expect(
-        tester
-            .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Select files'),
-            )
-            .onPressed,
-        isNotNull,
+        find.text('File transfer is unavailable').evaluate().isNotEmpty ||
+            find.text('Pair a device').evaluate().isNotEmpty,
+        isTrue,
       );
+      expect(find.text('Receive'), findsNothing);
       expect(tester.takeException(), isNull);
     });
   }

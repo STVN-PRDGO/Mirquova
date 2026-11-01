@@ -47,4 +47,27 @@ int32_t mq_pairing_reject(void);
 // JSON contains only state and public candidate CA bytes. Free with mq_string_free.
 char *mq_pairing_snapshot(void);
 void mq_pairing_stop(void);
+// Receive and send sessions run independently. Config is UTF-8 JSON. Receive
+// binds a private IPv4 or 0.0.0.0 and accepts only trusted peer CAs; files are
+// written only after mq_transfer_approve. 1 started, 0 rejected, -1 failure.
+int32_t mq_transfer_receive_start(const uint8_t *config_json,
+                                  uint32_t config_len,
+                                  const uint8_t *certificate_der,
+                                  uint32_t certificate_len,
+                                  const uint8_t *private_key_pkcs8_der,
+                                  uint32_t private_key_len);
+int32_t mq_transfer_send_start(const uint8_t *config_json, uint32_t config_len,
+                               const uint8_t *certificate_der,
+                               uint32_t certificate_len,
+                               const uint8_t *private_key_pkcs8_der,
+                               uint32_t private_key_len);
+int32_t mq_transfer_approve(void);
+int32_t mq_transfer_reject(void);
+// Owned JSON snapshots. Free with mq_string_free.
+char *mq_transfer_receive_snapshot(void);
+char *mq_transfer_send_snapshot(void);
+void mq_transfer_receive_stop(void);
+void mq_transfer_send_stop(void);
+// Stops both sessions.
+void mq_transfer_stop(void);
 #endif

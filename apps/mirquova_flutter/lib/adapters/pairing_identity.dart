@@ -312,6 +312,40 @@ class PairingTrustRepository {
     });
   }
 
+  /// Records the address a verified peer last connected from, so the next
+  /// send reaches it after the router hands out a new address.
+  Future<void> updateAddress(String fingerprintSha256, String lanIpv4) {
+    if (ManualEndpoint.parse(lanIpv4, '1')?.address != lanIpv4) {
+      throw const FormatException('Trusted peer address is invalid.');
+    }
+    return _mutate(() async {
+      final peers = await _readCurrent();
+      if (!peers.any(
+        (peer) =>
+            peer.fingerprintSha256 == fingerprintSha256 &&
+            peer.lanIpv4 != lanIpv4,
+      )) {
+        return;
+      }
+      await store.write(
+        storageKey,
+        _encodePeers([
+          for (final peer in peers)
+            if (peer.fingerprintSha256 == fingerprintSha256)
+              TrustedPeer(
+                fingerprintSha256: peer.fingerprintSha256,
+                alias: peer.alias,
+                certificateDer: peer.certificateDer,
+                pairedAt: peer.pairedAt,
+                lanIpv4: lanIpv4,
+              )
+            else
+              peer,
+        ]),
+      );
+    });
+  }
+
   Future<void> revoke(String fingerprintSha256) {
     if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(fingerprintSha256)) {
       throw const FormatException('Trusted peer fingerprint is invalid.');

@@ -70,7 +70,9 @@ void main() {
             tester.platformDispatcher.clearPlatformBrightnessTestValue,
           );
           addTearDown(() => tester.binding.setSurfaceSize(null));
-          await tester.pumpWidget(MirquovaApp(discovery: _IdleDiscovery()));
+          await tester.pumpWidget(
+            MirquovaApp(discovery: _IdleDiscovery(), showIntro: false),
+          );
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
           await expectLater(
@@ -93,7 +95,9 @@ void main() {
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(MirquovaApp(discovery: _IdleDiscovery()));
+    await tester.pumpWidget(
+      MirquovaApp(discovery: _IdleDiscovery(), showIntro: false),
+    );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await tester.tap(find.byTooltip('Open navigation menu'));

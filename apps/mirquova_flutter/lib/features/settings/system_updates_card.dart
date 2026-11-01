@@ -1,5 +1,8 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 
+import '../../adapters/auto_update.dart';
 import '../../adapters/package_updates.dart';
 import '../../core/app_updates.dart';
 
@@ -10,12 +13,16 @@ class SystemUpdatesCard extends StatefulWidget {
     required this.readingVersion,
     required this.onRetryVersion,
     required this.packages,
+    required this.autoUpdate,
+    required this.onAutoUpdateChanged,
   });
 
   final UpdateController? updates;
   final bool readingVersion;
   final VoidCallback onRetryVersion;
   final PackageUpdates packages;
+  final AutoUpdate autoUpdate;
+  final ValueChanged<bool> onAutoUpdateChanged;
 
   @override
   State<SystemUpdatesCard> createState() => _SystemUpdatesCardState();
@@ -51,7 +58,11 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: ListenableBuilder(
-          listenable: Listenable.merge([updates, widget.packages]),
+          listenable: Listenable.merge([
+            updates,
+            widget.packages,
+            widget.autoUpdate,
+          ]),
           builder: (context, _) => _content(context, updates),
         ),
       ),
@@ -96,7 +107,19 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
         Text('System updates', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
         const Text('Keep your Mirquova app up to date.'),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: widget.autoUpdate.enabled,
+          onChanged: widget.onAutoUpdateChanged,
+          title: const Text('Update automatically'),
+          subtitle: Text(
+            Platform.isWindows
+                ? 'Checks GitHub when Mirquova opens, downloads new versions, and restarts Mirquova to install them.'
+                : 'Checks GitHub when Mirquova opens and downloads new versions. Android asks you to confirm each install.',
+          ),
+        ),
+        const SizedBox(height: 12),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(16),
@@ -259,7 +282,7 @@ class _SystemUpdatesCardState extends State<SystemUpdatesCard> {
         ],
         const SizedBox(height: 16),
         const Text(
-          'Press Update once. Mirquova checks, downloads, and opens the package. Nothing runs until you press it.',
+          'Press Update once to check, download, and install now. With automatic updates off, nothing contacts GitHub until you press it.',
         ),
       ],
     );

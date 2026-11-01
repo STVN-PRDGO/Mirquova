@@ -143,11 +143,31 @@ jobs:
       - name: Get Flutter dependencies
         working-directory: apps/mirquova_flutter
         run: flutter pub get --enforce-lockfile
+      - name: Restore the Android signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MIRQUOVA_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MIRQUOVA_ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          # A random runner key would make the APK impossible to install as an update.
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Add the MIRQUOVA_ANDROID_KEYSTORE_BASE64 and MIRQUOVA_ANDROID_KEYSTORE_PASSWORD repository secrets."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/mirquova-android.jks"
       - name: Build Flutter Android APK
         working-directory: apps/mirquova_flutter
+        env:
+          MIRQUOVA_KEYSTORE_PATH: ${{ runner.temp }}/mirquova-android.jks
+          MIRQUOVA_KEYSTORE_PASSWORD: ${{ secrets.MIRQUOVA_ANDROID_KEYSTORE_PASSWORD }}
         run: flutter build apk --debug --build-name "$MIRQUOVA_BUILD_NAME" --build-number "$MIRQUOVA_BUILD_NUMBER" --target-platform android-arm64,android-x64
       - name: Copy Android APK
         run: cp apps/mirquova_flutter/build/app/outputs/flutter-apk/app-debug.apk Mirquova-preview-android-arm64-debug.apk
+      - name: Verify the APK uses the Mirquova signing key
+        run: |
+          rm -f "$RUNNER_TEMP/mirquova-android.jks"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort | tail -n 1)"
+          "$apksigner" verify --print-certs Mirquova-preview-android-arm64-debug.apk | tee signer.txt
+          grep -qi 'SHA-256 digest: 9aece808a5d67282619e4074ab5e8e5eed020569c04e16240eec4d9513acb58a' signer.txt
       - name: Upload Android Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -222,7 +242,7 @@ jobs:
 
           #### Downloads
           - **Windows (x64)**: Extract `Mirquova-preview-windows-x64.zip` completely and run `mirquova.exe`. Keep all bundled files together.
-          - **Android**: Install `Mirquova-preview-android-arm64-debug.apk`. It contains ARM64 and x64 code and is a debug-signed phone preview. It is not a TV app.
+          - **Android**: Install `Mirquova-preview-android-arm64-debug.apk`. It contains ARM64 and x64 code and is a debuggable phone preview signed with the permanent Mirquova key, so later releases install over it. Builds published before this key existed must be uninstalled once. It is not a TV app.
           - **Linux (x64)**: Extract `Mirquova-preview-linux-x64.tar.gz`, keep the entire bundle together, and run `./mirquova`. Built on Ubuntu 24.04; requires GTK3 and compatible system libraries.
 
           #### Notes

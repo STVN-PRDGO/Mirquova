@@ -6,7 +6,7 @@ use rcgen::{
 use rustls::{
     ClientConfig, RootCertStore, ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName},
-    server::WebPkiClientVerifier,
+    server::{WebPkiClientVerifier, danger::ClientCertVerifier},
 };
 use std::{fmt, sync::Arc};
 use x509_parser::parse_x509_certificate;
@@ -139,6 +139,16 @@ impl PairingIdentity {
             .with_single_cert(certificate, key)
             .map_err(|_| PairingCryptoError::TlsConfiguration)?;
         Ok(Arc::new(config))
+    }
+
+    /// Verifies client leaves issued by exactly one peer CA, so a receiver can
+    /// tell which trusted device completed a handshake.
+    pub fn client_verifier_for_peer(
+        peer_ca_certificate_der: &[u8],
+    ) -> Result<Arc<dyn ClientCertVerifier>, PairingCryptoError> {
+        WebPkiClientVerifier::builder(Arc::new(root_store(peer_ca_certificate_der)?))
+            .build()
+            .map_err(|_| PairingCryptoError::TlsConfiguration)
     }
 
     pub fn mutual_client_config(

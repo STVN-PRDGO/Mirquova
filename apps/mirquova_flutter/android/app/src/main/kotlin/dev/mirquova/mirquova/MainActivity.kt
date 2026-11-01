@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import java.io.File
@@ -66,6 +67,24 @@ class MainActivity : FlutterActivity() {
                         } catch (_: PackageManager.NameNotFoundException) {
                             result.error("version_unavailable", "The installed application version could not be read.", null)
                         }
+                    }
+                    "getDeviceName" -> {
+                        val named = Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)
+                        val model = listOf(Build.MANUFACTURER, Build.MODEL)
+                            .filter { it.isNotBlank() }
+                            .distinctBy { it.lowercase() }
+                            .joinToString(" ") { it.replaceFirstChar(Char::titlecase) }
+                        result.success(named?.takeIf { it.isNotBlank() } ?: model)
+                    }
+                    "getReceiveDirectory" -> {
+                        val shared = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            @Suppress("DEPRECATION")
+                            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Mirquova")
+                        } else null
+                        val appOwned = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let { File(it, "Mirquova") }
+                        val folder = listOfNotNull(shared, appOwned).firstOrNull { writable(it) }
+                        if (folder != null) result.success(folder.canonicalPath)
+                        else result.error("storage_unavailable", "No folder is available for received files.", null)
                     }
                     "getUpdateDirectory" -> {
                         val root = File(cacheDir, "mirquova-updates")
@@ -132,6 +151,16 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    // Scoped storage can list a folder as writable and still refuse new files.
+    private fun writable(folder: File): Boolean = try {
+        (folder.isDirectory || folder.mkdirs()) &&
+            File(folder, ".mirquova-${System.nanoTime()}.probe").let { probe ->
+                probe.createNewFile().also { probe.delete() }
+            }
+    } catch (_: Exception) {
+        false
     }
 
     private fun releaseMulticast() {

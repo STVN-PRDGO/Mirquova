@@ -2,11 +2,12 @@
 //! File bytes are written only after the receiver approves the offer.
 use crate::{discovery::is_lan_address, pairing::PairingIdentity};
 use aws_lc_rs::digest::{Context, SHA256};
+use rustls::{pki_types::UnixTime, server::danger::ClientCertVerifier};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File},
     io::{self, Read, Write},
-    net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream},
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -14,7 +15,7 @@ use std::{
         mpsc::{self, Receiver, SyncSender},
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
@@ -27,6 +28,9 @@ const MAX_NAME_BYTES: usize = 120;
 const IO_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const ACCEPT_POLL: Duration = Duration::from_millis(100);
+/// The receiver declines on its own if nobody answers the offer in time.
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
+const DECISION_READ_TIMEOUT: Duration = Duration::from_secs(75);
 const CHUNK: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,6 +86,12 @@ pub struct TransferSnapshot {
     pub endpoint: Option<String>,
     pub files: Vec<TransferFileSnapshot>,
     pub error_code: Option<&'static str>,
+    /// Index into the receiver's trusted peer list, set once the sender's
+    /// client certificate has been verified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peer_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peer_ipv4: Option<String>,
 }
 
 #[derive(Clone)]
@@ -168,14 +178,17 @@ pub struct ReceiveSession {
 }
 
 impl ReceiveSession {
+    /// `bind_ipv4` may be a private LAN address or `0.0.0.0` for every
+    /// interface. Connections from public addresses are dropped either way.
     pub fn start(
-        local_ipv4: Ipv4Addr,
+        bind_ipv4: Ipv4Addr,
         port: u16,
         identity: PairingIdentity,
         trusted_peer_cas: &[impl AsRef<[u8]>],
         destination: &Path,
     ) -> Result<Self, TransferStartError> {
-        if !is_lan_address(local_ipv4) || trusted_peer_cas.is_empty() {
+        if !(bind_ipv4.is_unspecified() || is_lan_address(bind_ipv4)) || trusted_peer_cas.is_empty()
+        {
             return Err(TransferStartError::InvalidInput);
         }
         let destination = destination.to_path_buf();
@@ -185,7 +198,12 @@ impl ReceiveSession {
         let config = identity
             .mutual_server_config_for_trusted_peers(trusted_peer_cas)
             .map_err(|_| TransferStartError::InvalidInput)?;
-        let listener = TcpListener::bind(SocketAddrV4::new(local_ipv4, port))
+        let verifiers = trusted_peer_cas
+            .iter()
+            .map(|ca| PairingIdentity::client_verifier_for_peer(ca.as_ref()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| TransferStartError::InvalidInput)?;
+        let listener = TcpListener::bind(SocketAddrV4::new(bind_ipv4, port))
             .map_err(|_| TransferStartError::Network)?;
         listener
             .set_nonblocking(true)
@@ -193,7 +211,7 @@ impl ReceiveSession {
         let local = listener
             .local_addr()
             .map_err(|_| TransferStartError::Network)?;
-        let endpoint = SocketAddrV4::new(local_ipv4, local.port());
+        let endpoint = SocketAddrV4::new(bind_ipv4, local.port());
         let state = SharedState::new(TransferStatus::Listening, TransferRole::Receive);
         state.update(|value| value.endpoint = Some(endpoint.to_string()));
         let cancel = Arc::new(AtomicBool::new(false));
@@ -206,6 +224,7 @@ impl ReceiveSession {
                 receive_worker(
                     listener,
                     config,
+                    verifiers,
                     destination,
                     worker_state,
                     worker_cancel,
@@ -359,17 +378,25 @@ impl Drop for SendSession {
 fn receive_worker(
     listener: TcpListener,
     config: std::sync::Arc<rustls::ServerConfig>,
+    verifiers: Vec<Arc<dyn ClientCertVerifier>>,
     destination: PathBuf,
     state: SharedState,
     cancel: Arc<AtomicBool>,
     decision_rx: Receiver<bool>,
 ) {
-    let socket = loop {
+    let (socket, peer) = loop {
         if cancel.load(Ordering::Acquire) {
             return;
         }
         match listener.accept() {
-            Ok((socket, _)) => break socket,
+            // Loopback covers emulator port forwarding; mutual TLS still
+            // requires a trusted peer certificate.
+            Ok((socket, SocketAddr::V4(peer)))
+                if is_lan_address(*peer.ip()) || peer.ip().is_loopback() =>
+            {
+                break (socket, *peer.ip());
+            }
+            Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(ACCEPT_POLL);
             }
@@ -406,7 +433,20 @@ fn receive_worker(
             return;
         }
     };
+    let sender = stream
+        .conn
+        .peer_certificates()
+        .and_then(|chain| chain.first())
+        .and_then(|leaf| {
+            verifiers.iter().position(|verifier| {
+                verifier
+                    .verify_client_cert(leaf, &[], UnixTime::now())
+                    .is_ok()
+            })
+        });
     state.update(|value| {
+        value.peer_index = sender;
+        value.peer_ipv4 = is_lan_address(peer).then(|| peer.to_string());
         value.status = TransferStatus::AwaitingApproval;
         value.files = files
             .iter()
@@ -423,10 +463,21 @@ fn receive_worker(
         let _ = write_decision(&mut stream, false);
         return;
     }
-    if !accept {
-        let _ = write_decision(&mut stream, false);
-        state.update(|value| value.status = TransferStatus::Rejected);
-        return;
+    match accept {
+        Some(true) => {}
+        Some(false) => {
+            let _ = write_decision(&mut stream, false);
+            state.update(|value| value.status = TransferStatus::Rejected);
+            return;
+        }
+        None => {
+            let _ = write_decision(&mut stream, false);
+            state.update(|value| {
+                value.status = TransferStatus::Rejected;
+                value.error_code = Some("no_answer");
+            });
+            return;
+        }
     }
     if write_decision(&mut stream, true).is_err() {
         state.fail("network");
@@ -456,10 +507,22 @@ fn receive_worker(
 fn send_worker(
     endpoint: SocketAddrV4,
     config: std::sync::Arc<rustls::ClientConfig>,
-    files: Vec<ListedFile>,
+    mut files: Vec<ListedFile>,
     state: SharedState,
     cancel: Arc<AtomicBool>,
 ) {
+    for file in &mut files {
+        if cancel.load(Ordering::Acquire) {
+            return;
+        }
+        match hash_file(&file.path, file.size, &cancel) {
+            Ok(sha256) => file.sha256 = sha256,
+            Err(code) => {
+                state.fail(code);
+                return;
+            }
+        }
+    }
     if cancel.load(Ordering::Acquire) {
         return;
     }
@@ -498,18 +561,34 @@ fn send_worker(
         return;
     }
     state.update(|value| value.status = TransferStatus::AwaitingApproval);
+    if stream
+        .sock
+        .set_read_timeout(Some(DECISION_READ_TIMEOUT))
+        .is_err()
+    {
+        state.fail("network");
+        return;
+    }
     let decision = match read_frame(&mut stream)
         .and_then(|bytes| serde_json::from_slice::<Decision>(&bytes).map_err(|_| invalid_data()))
     {
         Ok(decision) => decision,
-        Err(_) => {
+        Err(error) => {
             if cancel.load(Ordering::Acquire) {
                 return;
             }
-            state.fail("protocol");
+            state.fail(match error.kind() {
+                io::ErrorKind::InvalidData => "protocol",
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => "no_answer",
+                _ => "network",
+            });
             return;
         }
     };
+    if stream.sock.set_read_timeout(Some(IO_TIMEOUT)).is_err() {
+        state.fail("network");
+        return;
+    }
     if decision.version != PROTOCOL_VERSION || decision.purpose != "file-decision" {
         state.fail("protocol");
         return;
@@ -550,15 +629,20 @@ fn send_worker(
     state.update(|value| value.status = TransferStatus::Completed);
 }
 
-fn wait_for_decision(decision_rx: &Receiver<bool>, cancel: &AtomicBool) -> bool {
+/// `None` means nobody answered before [`APPROVAL_TIMEOUT`].
+fn wait_for_decision(decision_rx: &Receiver<bool>, cancel: &AtomicBool) -> Option<bool> {
+    let deadline = Instant::now() + APPROVAL_TIMEOUT;
     loop {
         if cancel.load(Ordering::Acquire) {
-            return false;
+            return Some(false);
+        }
+        if Instant::now() >= deadline {
+            return None;
         }
         match decision_rx.recv_timeout(ACCEPT_POLL) {
-            Ok(accept) => return accept,
+            Ok(accept) => return Some(accept),
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => return false,
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Some(false),
         }
     }
 }
@@ -772,30 +856,43 @@ fn list_local_files(paths: &[PathBuf]) -> Result<Vec<ListedFile>, &'static str> 
         if names.iter().any(|existing: &String| existing == name) {
             return Err("invalid_name");
         }
-        let source = File::open(path).map_err(|_| "storage")?;
-        let metadata = source.metadata().map_err(|_| "storage")?;
+        let metadata = File::open(path)
+            .and_then(|source| source.metadata())
+            .map_err(|_| "storage")?;
         if !metadata.is_file() || metadata.len() > MAX_FILE_BYTES {
             return Err("invalid_input");
-        }
-        let mut hasher = Context::new(&SHA256);
-        let mut reader = source;
-        let mut buffer = [0_u8; CHUNK];
-        loop {
-            let read = reader.read(&mut buffer).map_err(|_| "storage")?;
-            if read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..read]);
         }
         names.push(name.to_owned());
         files.push(ListedFile {
             name: name.to_owned(),
             size: metadata.len(),
-            sha256: encode_hex(hasher.finish().as_ref()),
+            sha256: String::new(),
             path: path.clone(),
         });
     }
     Ok(files)
+}
+
+fn hash_file(path: &Path, size: u64, cancel: &AtomicBool) -> Result<String, &'static str> {
+    let mut reader = File::open(path).map_err(|_| "storage")?;
+    let mut hasher = Context::new(&SHA256);
+    let mut buffer = [0_u8; CHUNK];
+    let mut total = 0_u64;
+    loop {
+        if cancel.load(Ordering::Acquire) {
+            return Err("cancelled");
+        }
+        let read = reader.read(&mut buffer).map_err(|_| "storage")?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        total += read as u64;
+    }
+    if total != size {
+        return Err("storage");
+    }
+    Ok(encode_hex(hasher.finish().as_ref()))
 }
 
 fn validate_offer(offer: &Offer) -> Result<&[OfferFile], &'static str> {
@@ -1004,6 +1101,20 @@ mod tests {
     }
 
     #[test]
+    fn receiving_rejects_a_public_bind_address() {
+        let receiver = PairingIdentity::generate().unwrap();
+        let peer = PairingIdentity::generate().unwrap();
+        let result = ReceiveSession::start(
+            Ipv4Addr::new(8, 8, 8, 8),
+            0,
+            receiver,
+            &[peer.certificate_der()],
+            &std::env::temp_dir(),
+        );
+        assert!(matches!(result, Err(TransferStartError::InvalidInput)));
+    }
+
+    #[test]
     fn offer_rejects_a_bad_digest_before_approval() {
         let offer = Offer {
             version: 1,
@@ -1074,11 +1185,20 @@ mod tests {
 
         let sender = PairingIdentity::generate().unwrap();
         let sender_ca = sender.certificate_der().to_vec();
+        let other_ca = PairingIdentity::generate()
+            .unwrap()
+            .certificate_der()
+            .to_vec();
         let receiver = PairingIdentity::generate().unwrap();
         let receiver_ca = receiver.certificate_der().to_vec();
-        let receive =
-            ReceiveSession::start(address, 0, receiver, &[sender_ca.as_slice()], &destination)
-                .unwrap();
+        let receive = ReceiveSession::start(
+            Ipv4Addr::UNSPECIFIED,
+            0,
+            receiver,
+            &[other_ca.as_slice(), sender_ca.as_slice()],
+            &destination,
+        )
+        .unwrap();
         let send = SendSession::start(
             address,
             receive.endpoint().port(),
@@ -1089,6 +1209,8 @@ mod tests {
         .unwrap();
         wait_until(&receive, TransferStatus::AwaitingApproval);
         assert_eq!(receive.snapshot().files[0].name, "note.txt");
+        assert_eq!(receive.snapshot().peer_index, Some(1));
+        assert_eq!(receive.snapshot().peer_ipv4, Some(address.to_string()));
         assert!(receive.approve());
         wait_until(&send, TransferStatus::Completed);
         wait_until(&receive, TransferStatus::Completed);

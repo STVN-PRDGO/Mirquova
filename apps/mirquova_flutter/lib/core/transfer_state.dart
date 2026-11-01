@@ -38,6 +38,8 @@ class TransferSnapshot {
     this.endpoint,
     this.files = const [],
     this.errorCode,
+    this.peerIndex,
+    this.peerIpv4,
   });
 
   final TransferStatus status;
@@ -45,6 +47,15 @@ class TransferSnapshot {
   final String? endpoint;
   final List<TransferFileSnapshot> files;
   final String? errorCode;
+
+  /// Index into the trusted peer list the receiver was started with. Set only
+  /// after the sender's certificate was verified.
+  final int? peerIndex;
+  final String? peerIpv4;
+
+  int get totalBytes => files.fold(0, (sum, file) => sum + file.size);
+  int get transferredBytes =>
+      files.fold(0, (sum, file) => sum + file.transferred);
 
   bool get finished => switch (status) {
     TransferStatus.completed ||
@@ -65,6 +76,8 @@ class TransferSnapshot {
       },
       endpoint: json['endpoint'] as String?,
       errorCode: json['error_code'] as String?,
+      peerIndex: (json['peer_index'] as num?)?.toInt(),
+      peerIpv4: json['peer_ipv4'] as String?,
       files: files is! List
           ? const []
           : [
@@ -100,6 +113,18 @@ TransferFileState _fileState(String? value) => switch (value) {
   _ => TransferFileState.pending,
 };
 
+String formatBytes(int bytes) {
+  const units = ['B', 'KB', 'MB', 'GB'];
+  var value = bytes.toDouble();
+  var unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  final digits = unit == 0 || value >= 100 ? 0 : 1;
+  return '${value.toStringAsFixed(digits)} ${units[unit]}';
+}
+
 String transferStatusMessage(TransferSnapshot snapshot) =>
     switch (snapshot.status) {
       TransferStatus.idle => 'No transfer is running.',
@@ -111,13 +136,17 @@ String transferStatusMessage(TransferSnapshot snapshot) =>
         'Transferring. Checksums are verified before a file is kept.',
       TransferStatus.completed =>
         'Transfer finished and the checksums matched.',
-      TransferStatus.rejected => 'The transfer was declined. No file was kept.',
+      TransferStatus.rejected =>
+        snapshot.errorCode == 'no_answer'
+            ? 'Nobody answered in time. No file was kept.'
+            : 'The transfer was declined. No file was kept.',
       TransferStatus.stopped => 'The transfer was stopped.',
       TransferStatus.error => _error(snapshot.errorCode),
     };
 
 String _error(String? code) => switch (code) {
-  'network' => 'The paired device could not be reached on this LAN.',
+  'network' => 'The device could not be reached. Open Mirquova on it and keep both devices on the same Wi-Fi.',
+  'no_answer' => 'Nobody answered the request on the other device.',
   'tls_failed' =>
     'The device certificate was rejected. Pair again before transferring.',
   'conflict' => 'A file with that name is already in the destination. Nothing was overwritten.',

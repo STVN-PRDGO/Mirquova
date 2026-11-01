@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../core/app_updates.dart';
+import 'windows_self_update.dart';
 
 abstract interface class PackagePlatform {
   String? get packageName;
@@ -38,8 +39,14 @@ class NativePackagePlatform implements PackagePlatform {
   }
 
   @override
-  Future<void> openPackage(File file) =>
-      _channel.invokeMethod<void>('openUpdatePackage', file.path);
+  Future<void> openPackage(File file) async {
+    // A debug runner is not a portable install, so it only opens the ZIP.
+    if (Platform.isWindows && kReleaseMode) {
+      await const WindowsSelfUpdate().stage(file);
+      exit(0);
+    }
+    await _channel.invokeMethod<void>('openUpdatePackage', file.path);
+  }
 }
 
 enum PackageStatus { idle, downloading, ready, opening, error }
@@ -263,13 +270,19 @@ class PackageUpdates extends ChangeNotifier {
     }
   }
 
-  Future<void> open() async {
+  /// Android refused to start the installer until the user allows it.
+  bool needsInstallPermission = false;
+
+  /// True when the system installer (or Windows updater) was started.
+  Future<bool> open() async {
     final file = _file;
     final selected = asset;
-    if (_disposed || busy || file == null || selected == null) return;
+    if (_disposed || busy || file == null || selected == null) return false;
     status = PackageStatus.opening;
     message = null;
+    needsInstallPermission = false;
     notifyListeners();
+    var opened = false;
     try {
       if (await file.length() != selected.size ||
           (await sha256.bind(file.openRead()).first).toString() !=
@@ -278,14 +291,16 @@ class PackageUpdates extends ChangeNotifier {
           'The downloaded package changed. Download it again.',
         );
       }
-      if (_disposed) return;
+      if (_disposed) return false;
       await platform.openPackage(file);
-      if (_disposed) return;
+      if (_disposed) return false;
+      opened = true;
       status = PackageStatus.ready;
       message = 'Package opened. Follow the system installation steps.';
     } on PlatformException catch (error) {
       if (!_disposed) {
         status = PackageStatus.ready;
+        needsInstallPermission = error.code == 'install_permission';
         message = error.message ?? 'Could not open the package.';
       }
     } catch (error) {
@@ -295,6 +310,7 @@ class PackageUpdates extends ChangeNotifier {
       }
     }
     if (!_disposed) notifyListeners();
+    return opened;
   }
 
   void cancel() {

@@ -650,10 +650,16 @@ fn join_worker(
     {
         return fail(&state, "mutual_proof_write");
     }
-    let response: PairingResponse = match read_frame(&mut stream)
+    // The host may take until its invitation expires to approve.
+    let decision_deadline = Instant::now() + invitation.remaining_validity() + IO_TIMEOUT;
+    let response: PairingResponse = match read_frame_until(&mut stream, decision_deadline, &cancel)
         .and_then(|bytes| serde_json::from_slice(&bytes).map_err(invalid_data))
     {
         Ok(response) => response,
+        Err(_) if cancel.load(Ordering::Acquire) => return,
+        Err(error) if error.kind() == io::ErrorKind::TimedOut => {
+            return fail(&state, "no_answer");
+        }
         Err(_) => return fail(&state, "network"),
     };
     if !message_matches_protocol(response.protocol_version, response.role, PairingRole::Host) {
@@ -847,6 +853,54 @@ fn read_frame(stream: &mut impl Read) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Waits for one frame while a person decides on the other device. Polling a
+/// nonblocking socket keeps cancellation prompt, and Rustls tolerates
+/// `WouldBlock` without losing buffered records.
+fn read_frame_until(
+    stream: &mut ClientStream,
+    deadline: Instant,
+    cancel: &AtomicBool,
+) -> io::Result<Vec<u8>> {
+    stream.get_ref().set_nonblocking(true)?;
+    let mut buffered = Vec::new();
+    let mut chunk = [0; 1024];
+    let result = loop {
+        if buffered.len() >= 4 {
+            let length = u32::from_be_bytes([buffered[0], buffered[1], buffered[2], buffered[3]])
+                as usize;
+            if length == 0 || length > MAX_PAIRING_MESSAGE_BYTES {
+                break Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "pairing message exceeds limit",
+                ));
+            }
+            if buffered.len() >= 4 + length {
+                break Ok(buffered[4..4 + length].to_vec());
+            }
+        }
+        if cancel.load(Ordering::Acquire) {
+            break Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "pairing was cancelled",
+            ));
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) => break Err(io::ErrorKind::UnexpectedEof.into()),
+            Ok(count) => buffered.extend_from_slice(&chunk[..count]),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    break Err(io::ErrorKind::TimedOut.into());
+                }
+                thread::sleep(ACCEPT_POLL);
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => break Err(error),
+        }
+    };
+    let _ = stream.get_ref().set_nonblocking(false);
+    result
+}
+
 fn decode_hex(value: &str, max_bytes: usize) -> Option<Vec<u8>> {
     if value.is_empty() || !value.len().is_multiple_of(2) || value.len() / 2 > max_bytes {
         return None;
@@ -990,7 +1044,7 @@ mod tests {
         Some(address)
     }
 
-    fn exercise_pairing(approve: bool) {
+    fn exercise_pairing(approve: bool, approval_delay: Duration) {
         let _serial = TRANSPORT_TEST_LOCK.lock().unwrap();
         let Some(address) = private_interface_address() else {
             eprintln!("skipping same-host pairing transport: no connectable RFC1918 interface");
@@ -1074,6 +1128,13 @@ mod tests {
             Some(encode_hex(&joining_ca).as_str())
         );
 
+        thread::sleep(approval_delay);
+        assert_eq!(
+            joining.snapshot().status,
+            PairingStatus::Connecting,
+            "the joiner must keep waiting while the host decides; error {:?}",
+            joining.snapshot().error_code,
+        );
         assert!(if approve {
             host.approve()
         } else {
@@ -1100,6 +1161,41 @@ mod tests {
 
         drop(joining);
         drop(host);
+    }
+
+    fn exercise_cancel_while_awaiting_approval() {
+        let _serial = TRANSPORT_TEST_LOCK.lock().unwrap();
+        let Some(address) = private_interface_address() else {
+            eprintln!("skipping same-host pairing transport: no connectable RFC1918 interface");
+            return;
+        };
+        let host_identity = PairingIdentity::generate().unwrap();
+        let fingerprint = digest(&SHA256, host_identity.certificate_der());
+        let host = HostSession::start(
+            address,
+            0,
+            host_identity,
+            "Host device",
+            Duration::from_secs(30),
+        )
+        .unwrap();
+        let mut joining = JoinSession::start(
+            host.payload().as_bytes(),
+            fingerprint.as_ref().try_into().unwrap(),
+            PairingIdentity::generate().unwrap(),
+            "Joining phone",
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while host.snapshot().status != PairingStatus::AwaitingApproval && Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(host.snapshot().status, PairingStatus::AwaitingApproval);
+        let started = Instant::now();
+        joining.stop();
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(joining.snapshot().status, PairingStatus::Stopped);
     }
 
     fn reject_incompatible_bootstrap(host: &HostSession, version: u16, role: PairingRole) {
@@ -1492,13 +1588,25 @@ mod tests {
     #[test]
     #[ignore = "explicit same-host private-interface TLS transport run; not physical-device validation"]
     fn local_private_interface_pairing_can_be_approved() {
-        exercise_pairing(true);
+        exercise_pairing(true, Duration::ZERO);
     }
 
     #[test]
     #[ignore = "explicit same-host private-interface TLS transport run; not physical-device validation"]
     fn local_private_interface_pairing_can_be_rejected() {
-        exercise_pairing(false);
+        exercise_pairing(false, Duration::ZERO);
+    }
+
+    #[test]
+    #[ignore = "explicit same-host private-interface TLS transport run; not physical-device validation"]
+    fn local_private_interface_pairing_waits_for_a_slow_approval() {
+        exercise_pairing(true, Duration::from_secs(5));
+    }
+
+    #[test]
+    #[ignore = "explicit same-host private-interface TLS transport run; not physical-device validation"]
+    fn local_private_interface_join_cancels_promptly_while_awaiting_approval() {
+        exercise_cancel_while_awaiting_approval();
     }
 
     #[test]

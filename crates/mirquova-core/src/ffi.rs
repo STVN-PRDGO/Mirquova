@@ -55,30 +55,12 @@ fn pairing_runtime() -> &'static Mutex<PairingRuntime> {
     INSTANCE.get_or_init(|| Mutex::new(PairingRuntime::default()))
 }
 
+/// Receiving and sending are independent, so a device keeps listening while
+/// it sends to someone else.
 #[derive(Default)]
 struct TransferRuntime {
-    active: Option<ActiveTransfer>,
-}
-
-enum ActiveTransfer {
-    Receive(ReceiveSession),
-    Send(SendSession),
-}
-
-impl ActiveTransfer {
-    fn stop(&mut self) {
-        match self {
-            Self::Receive(session) => session.stop(),
-            Self::Send(session) => session.stop(),
-        }
-    }
-
-    fn snapshot(&self) -> TransferSnapshot {
-        match self {
-            Self::Receive(session) => session.snapshot(),
-            Self::Send(session) => session.snapshot(),
-        }
-    }
+    receive: Option<ReceiveSession>,
+    send: Option<SendSession>,
 }
 
 fn transfer_runtime() -> &'static Mutex<TransferRuntime> {
@@ -399,15 +381,37 @@ fn load_identity(
     PairingIdentity::from_stored(certificate, private_key).ok()
 }
 
-fn replace_transfer(active: ActiveTransfer) -> bool {
-    let Ok(mut manager) = transfer_runtime().lock() else {
-        return false;
-    };
-    if let Some(mut current) = manager.active.take() {
-        current.stop();
+fn stop_receive() {
+    let previous = transfer_runtime()
+        .lock()
+        .ok()
+        .and_then(|mut manager| manager.receive.take());
+    if let Some(mut session) = previous {
+        session.stop();
     }
-    manager.active = Some(active);
-    true
+}
+
+fn stop_send() {
+    let previous = transfer_runtime()
+        .lock()
+        .ok()
+        .and_then(|mut manager| manager.send.take());
+    if let Some(mut session) = previous {
+        session.stop();
+    }
+}
+
+fn snapshot_json(read: impl FnOnce(&TransferRuntime) -> Option<TransferSnapshot>) -> *mut c_char {
+    let snapshot = transfer_runtime()
+        .lock()
+        .ok()
+        .and_then(|manager| read(&manager))
+        .unwrap_or_default();
+    serde_json::to_string(&snapshot)
+        .ok()
+        .and_then(|json| CString::new(json).ok())
+        .map(CString::into_raw)
+        .unwrap_or(ptr::null_mut())
 }
 
 /// # Safety
@@ -452,6 +456,8 @@ pub unsafe extern "C" fn mq_transfer_receive_start(
             }
             peers.push(certificate);
         }
+        // The previous listener must release the shared port before rebinding.
+        stop_receive();
         let Ok(session) = ReceiveSession::start(
             address,
             config.port,
@@ -461,7 +467,11 @@ pub unsafe extern "C" fn mq_transfer_receive_start(
         ) else {
             return 0;
         };
-        i32::from(replace_transfer(ActiveTransfer::Receive(session)))
+        let Ok(mut manager) = transfer_runtime().lock() else {
+            return -1;
+        };
+        manager.receive = Some(session);
+        1
     })
     .unwrap_or(-1)
 }
@@ -503,11 +513,16 @@ pub unsafe extern "C" fn mq_transfer_send_start(
             .iter()
             .map(std::path::PathBuf::from)
             .collect::<Vec<_>>();
+        stop_send();
         let Ok(session) = SendSession::start(address, config.port, identity, &peer_ca, &paths)
         else {
             return 0;
         };
-        i32::from(replace_transfer(ActiveTransfer::Send(session)))
+        let Ok(mut manager) = transfer_runtime().lock() else {
+            return -1;
+        };
+        manager.send = Some(session);
+        1
     })
     .unwrap_or(-1)
 }
@@ -517,9 +532,11 @@ pub extern "C" fn mq_transfer_approve() -> i32 {
     std::panic::catch_unwind(|| {
         transfer_runtime()
             .lock()
-            .map(|manager| match &manager.active {
-                Some(ActiveTransfer::Receive(session)) => i32::from(session.approve()),
-                _ => 0,
+            .map(|manager| {
+                manager
+                    .receive
+                    .as_ref()
+                    .map_or(0, |session| i32::from(session.approve()))
             })
             .unwrap_or(-1)
     })
@@ -531,9 +548,11 @@ pub extern "C" fn mq_transfer_reject() -> i32 {
     std::panic::catch_unwind(|| {
         transfer_runtime()
             .lock()
-            .map(|manager| match &manager.active {
-                Some(ActiveTransfer::Receive(session)) => i32::from(session.reject()),
-                _ => 0,
+            .map(|manager| {
+                manager
+                    .receive
+                    .as_ref()
+                    .map_or(0, |session| i32::from(session.reject()))
             })
             .unwrap_or(-1)
     })
@@ -541,35 +560,36 @@ pub extern "C" fn mq_transfer_reject() -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mq_transfer_snapshot() -> *mut c_char {
+pub extern "C" fn mq_transfer_receive_snapshot() -> *mut c_char {
     std::panic::catch_unwind(|| {
-        let snapshot = transfer_runtime()
-            .lock()
-            .map(|manager| {
-                manager
-                    .active
-                    .as_ref()
-                    .map(ActiveTransfer::snapshot)
-                    .unwrap_or_default()
-            })
-            .unwrap_or_default();
-        serde_json::to_string(&snapshot)
-            .ok()
-            .and_then(|json| CString::new(json).ok())
-            .map(CString::into_raw)
-            .unwrap_or(ptr::null_mut())
+        snapshot_json(|manager| manager.receive.as_ref().map(ReceiveSession::snapshot))
     })
     .unwrap_or(ptr::null_mut())
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn mq_transfer_send_snapshot() -> *mut c_char {
+    std::panic::catch_unwind(|| {
+        snapshot_json(|manager| manager.send.as_ref().map(SendSession::snapshot))
+    })
+    .unwrap_or(ptr::null_mut())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_transfer_receive_stop() {
+    let _ = std::panic::catch_unwind(stop_receive);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_transfer_send_stop() {
+    let _ = std::panic::catch_unwind(stop_send);
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn mq_transfer_stop() {
     let _ = std::panic::catch_unwind(|| {
-        if let Ok(mut manager) = transfer_runtime().lock()
-            && let Some(mut active) = manager.active.take()
-        {
-            active.stop();
-        }
+        stop_send();
+        stop_receive();
     });
 }
 

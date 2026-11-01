@@ -1,8 +1,20 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// Android installs an update only when it is signed with the same key as the
+// installed app, so every published APK must use this one key. CI supplies it
+// through environment variables; local builds read android/key.properties.
+val localSigning = Properties().apply {
+    val file = rootProject.file("key.properties")
+    if (file.isFile) file.inputStream().use(::load)
+}
+val signingStore = System.getenv("MIRQUOVA_KEYSTORE_PATH") ?: localSigning.getProperty("storeFile")
+val signingPassword = System.getenv("MIRQUOVA_KEYSTORE_PASSWORD") ?: localSigning.getProperty("password")
 
 android {
     namespace = "dev.mirquova.mirquova"
@@ -15,10 +27,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "dev.mirquova.mirquova"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
@@ -29,11 +38,24 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (signingStore != null && signingPassword != null) {
+            create("mirquova") {
+                storeFile = file(signingStore)
+                storePassword = signingPassword
+                keyAlias = "mirquova"
+                keyPassword = signingPassword
+            }
+        }
+    }
+
     buildTypes {
+        val shared = signingConfigs.findByName("mirquova")
+        debug {
+            if (shared != null) signingConfig = shared
+        }
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = shared ?: signingConfigs.getByName("debug")
         }
     }
 }

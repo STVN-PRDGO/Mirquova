@@ -25,7 +25,7 @@ void main() {
       await tester.pumpWidget(
         RepaintBoundary(
           key: boundary,
-          child: MirquovaApp(discovery: discovery),
+          child: MirquovaApp(discovery: discovery, showIntro: false),
         ),
       );
       await tester.pumpAndSettle();

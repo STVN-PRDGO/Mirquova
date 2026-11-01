@@ -195,7 +195,7 @@ void main() {
     await tester.pumpWidget(
       RepaintBoundary(
         key: boundary,
-        child: MirquovaApp(discovery: discovery, updateSource: updates),
+        child: MirquovaApp(discovery: discovery, updateSource: updates, showIntro: false),
       ),
     );
     debugPrint('[native-pairing-smoke] loading native app UI');

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../adapters/auto_update.dart';
 import '../../adapters/package_updates.dart';
 import '../../core/app_updates.dart';
 import 'system_updates_card.dart';
@@ -13,6 +14,8 @@ class SettingsPage extends StatelessWidget {
     required this.readingVersion,
     required this.onRetryVersion,
     required this.packages,
+    required this.autoUpdate,
+    required this.onAutoUpdateChanged,
     required this.onOpenDevices,
     required this.onOpenPair,
   });
@@ -23,6 +26,8 @@ class SettingsPage extends StatelessWidget {
   final bool readingVersion;
   final VoidCallback onRetryVersion;
   final PackageUpdates packages;
+  final AutoUpdate autoUpdate;
+  final ValueChanged<bool> onAutoUpdateChanged;
   final VoidCallback onOpenDevices;
   final VoidCallback onOpenPair;
 
@@ -62,10 +67,12 @@ class SettingsPage extends StatelessWidget {
         readingVersion: readingVersion,
         onRetryVersion: onRetryVersion,
         packages: packages,
+        autoUpdate: autoUpdate,
+        onAutoUpdateChanged: onAutoUpdateChanged,
       ),
       const SizedBox(height: 24),
       const Text(
-        'Local by default. Update checks contact GitHub only with your permission. No account or online subtitle requests are used in this build.',
+        'Local by default. Mirquova contacts GitHub only when you press Update or turn on automatic updates. No account or online subtitle requests are used in this build.',
       ),
       const SizedBox(height: 16),
       const Text(

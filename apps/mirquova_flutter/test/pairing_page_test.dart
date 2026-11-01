@@ -156,7 +156,7 @@ void main() {
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 300));
           expect(tester.takeException(), isNull);
-          await tester.ensureVisible(find.text('Scan'));
+          await tester.ensureVisible(find.text('Stop'));
           await tester.pump(const Duration(milliseconds: 300));
           expect(tester.takeException(), isNull);
           expect(find.text('Invitation text'), findsNothing);
@@ -169,23 +169,39 @@ void main() {
     }
   }
 
+  Future<void> settle(WidgetTester tester) async {
+    for (var i = 0; i < 4; i++) {
+      await tester.pump();
+    }
+  }
+
   Future<void> scan(WidgetTester tester) async {
     await tester.ensureVisible(find.text('Scan'));
     await tester.tap(find.text('Scan'));
-    await tester.pump();
-    await tester.pump();
+    await settle(tester);
   }
 
-  testWidgets('scan readies this device without an invitation form', (
+  testWidgets('opening the page readies this device without a Scan tap', (
     tester,
   ) async {
     await tester.pumpWidget(page());
-    await tester.pump();
-    await scan(tester);
+    await settle(tester);
     expect(find.textContaining('This device is ready'), findsOneWidget);
     expect(find.text('Stop'), findsOneWidget);
     expect(find.text('Invitation text'), findsNothing);
     expect(find.text('Scan QR code'), findsNothing);
+  });
+
+  testWidgets('Stop ends readiness and Scan starts it again', (tester) async {
+    await tester.pumpWidget(page());
+    await settle(tester);
+    await tester.ensureVisible(find.text('Stop'));
+    await tester.tap(find.text('Stop'));
+    await settle(tester);
+    expect(find.textContaining('This device is ready'), findsNothing);
+    expect(transport.stopped, isTrue);
+    await scan(tester);
+    expect(find.textContaining('This device is ready'), findsOneWidget);
   });
 
   testWidgets('corrupt identity recovery requires a clear user confirmation', (
@@ -194,9 +210,7 @@ void main() {
     const key = 'mirquova.pairing.identity.v1';
     store.values[key] = '{broken';
     await tester.pumpWidget(page());
-    await tester.pump();
-
-    await scan(tester);
+    await settle(tester);
     expect(find.text('Reset corrupt pairing identity'), findsOneWidget);
     expect(store.values[key], '{broken');
 
@@ -227,8 +241,7 @@ void main() {
 
   testWidgets('hiding the app stops pairing', (tester) async {
     await tester.pumpWidget(page());
-    await tester.pump();
-    await scan(tester);
+    await settle(tester);
     expect(find.textContaining('This device is ready'), findsOneWidget);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);

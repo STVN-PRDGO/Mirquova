@@ -1,380 +1,262 @@
-import 'dart:io' show NetworkInterface, InternetAddressType;
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../adapters/native_transfer.dart';
 import '../../adapters/pairing_identity.dart';
-import '../../core/discovery_port.dart';
 import '../../core/transfer_state.dart';
 import '../../ui/surface_card.dart';
 
+/// Choose files, then tap a paired device. Receiving needs no setup: the app
+/// listens on its own and asks before saving anything.
 class TransferPage extends StatefulWidget {
-  const TransferPage({super.key, required this.ensureTransfer});
+  const TransferPage({
+    super.key,
+    required this.service,
+    required this.onOpenPair,
+    this.pickFiles,
+    this.pickFolder,
+  });
 
-  final Future<TransferController?> Function() ensureTransfer;
+  final TransferService? service;
+  final VoidCallback onOpenPair;
+  final Future<List<PickedTransferFile>> Function()? pickFiles;
+  final Future<String?> Function()? pickFolder;
 
   @override
   State<TransferPage> createState() => _TransferPageState();
 }
 
-class _TransferPageState extends State<TransferPage> {
-  bool _send = true;
-  final _files = <_QueuedFile>[];
-  String? _destination;
-  String? _localAddress;
-  List<TrustedPeer> _peers = const [];
-  String? _selectedFingerprint;
-  String? _activeAlias;
-  String? _notice;
-  TransferController? _transfer;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadAddresses();
-    _loadPeers();
-  }
-
-  Future<void> _loadAddresses() async {
-    try {
-      await _readAddresses();
-    } on Object {
-      if (mounted) setState(() => _localAddress = null);
-    }
-  }
-
-  Future<void> _readAddresses() async {
-    final interfaces = await NetworkInterface.list(
-      includeLoopback: false,
-      type: InternetAddressType.IPv4,
-    );
-    final addresses = <String>{};
-    for (final interface in interfaces) {
-      for (final address in interface.addresses) {
-        if (ManualEndpoint.parse(address.address, '1') != null) {
-          addresses.add(address.address);
-        }
-      }
-    }
-    if (!mounted) return;
-    final sorted = preferredLanAddresses(addresses);
-    setState(() => _localAddress = sorted.firstOrNull);
-  }
-
-  Future<void> _loadPeers() async {
-    final controller = _transfer ?? await widget.ensureTransfer();
-    if (!mounted || controller == null) return;
-    try {
-      final peers = await controller.trustedPeers.list();
-      if (!mounted) return;
-      setState(() {
-        _peers = peers;
-        _selectedFingerprint =
-            peers.any((peer) => peer.fingerprintSha256 == _selectedFingerprint)
-            ? _selectedFingerprint
-            : (peers.length == 1 ? peers.single.fingerprintSha256 : null);
-      });
-    } on Object {
-      if (mounted) {
-        setState(() => _notice = 'Trusted devices could not be read.');
-      }
-    }
-  }
-
-  TrustedPeer? get _selectedPeer {
-    for (final peer in _peers) {
-      if (peer.fingerprintSha256 == _selectedFingerprint) return peer;
-    }
-    return null;
-  }
-
-  void _attach(TransferController controller) {
-    if (!identical(_transfer, controller)) {
-      _transfer?.removeListener(_onTransfer);
-      _transfer = controller;
-      controller.addListener(_onTransfer);
-    }
-  }
-
-  void _onTransfer() {
-    if (mounted) setState(() {});
-  }
-
-  @override
-  void dispose() {
-    _transfer?.removeListener(_onTransfer);
-    super.dispose();
-  }
-
-  Future<void> _pickFiles() async {
-    final picked = await FilePicker.pickFiles(type: FileType.any);
-    if (!mounted || picked.isEmpty) return;
-    setState(() {
-      for (final file in picked) {
-        final path = file.path;
-        if (path == null || _files.any((item) => item.path == path)) continue;
-        _files.add(
-          _QueuedFile(
-            path: path,
-            name: file.name,
-            size: file.lengthSync() ?? 0,
-          ),
-        );
-      }
-      _notice = null;
-    });
-  }
-
-  Future<void> _pickFolder() async {
-    final directory = await FilePicker.getDirectoryPath(
-      dialogTitle: 'Choose where received files are saved',
-    );
-    if (!mounted || directory == null) return;
-    setState(() => _destination = directory);
-  }
-
-  Future<void> _startSend() async {
-    final controller = _transfer ?? await widget.ensureTransfer();
-    if (!mounted) return;
-    if (controller == null) {
-      setState(
-        () => _notice = 'Native transfer core is not available in this build.',
-      );
-      return;
-    }
-    final peer = _selectedPeer;
-    if (peer == null || _files.isEmpty) {
-      setState(() => _notice = 'Choose a paired device and a file.');
-      return;
-    }
-    final host = peer.lanIpv4;
-    if (host == null) {
-      setState(() => _notice = 'Pair ${peer.alias} again, then send the file.');
-      return;
-    }
-    setState(() {
-      _attach(controller);
-      _activeAlias = peer.alias;
-      _notice = null;
-    });
-    await controller.send(
-      peer: peer,
-      host: host,
-      port: mirquovaTransferPort,
-      paths: [for (final file in _files) file.path],
-    );
-  }
-
-  Future<void> _startReceive() async {
-    final controller = _transfer ?? await widget.ensureTransfer();
-    if (!mounted) return;
-    if (controller == null) {
-      setState(
-        () => _notice = 'Native transfer core is not available in this build.',
-      );
-      return;
-    }
-    final address = _localAddress;
-    final destination = _destination;
-    if (_peers.isEmpty) {
-      setState(() => _notice = 'Pair a device before receiving files.');
-      return;
-    }
-    if (address == null || destination == null) {
-      setState(() => _notice = 'Choose a folder before receiving.');
-      return;
-    }
-    setState(() {
-      _attach(controller);
-      _activeAlias = _peers.length == 1 ? _peers.single.alias : null;
-      _notice = null;
-    });
-    await controller.receive(localIpv4: address, destination: destination);
-  }
-
-  String _statusLine(TransferSnapshot snapshot) {
-    if (snapshot.status == TransferStatus.listening) {
-      final alias = _activeAlias;
-      if (alias != null) return 'Waiting for $alias.';
-    }
-    if (snapshot.status == TransferStatus.connecting) {
-      final alias = _activeAlias;
-      if (alias != null) return 'Connecting to $alias.';
-    }
-    return transferStatusMessage(snapshot);
-  }
-
-  Widget _deviceNames() {
-    final theme = Theme.of(context);
-    if (_peers.isEmpty) {
-      return Text(
-        _send
-            ? 'Pair a device before sending files.'
-            : 'Pair a device before receiving files.',
-      );
-    }
-    if (_peers.length == 1) {
-      return Text(_peers.single.alias, style: theme.textTheme.titleMedium);
-    }
-    return Column(
-      children: [
-        for (final peer in _peers)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.devices_outlined),
-            title: Text(peer.alias),
-            selected: peer.fingerprintSha256 == _selectedFingerprint,
-            onTap: () =>
-                setState(() => _selectedFingerprint = peer.fingerprintSha256),
-          ),
-      ],
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final snapshot = _transfer?.snapshot;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const PageHeader(
-          title: 'File transfer',
-          subtitle: 'Files move only to a paired device, and only after the receiver approves the offer.',
-        ),
-        const SizedBox(height: 20),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(
-                value: true,
-                label: Text('Send'),
-                icon: Icon(Icons.upload_outlined),
-              ),
-              ButtonSegment(
-                value: false,
-                label: Text('Receive'),
-                icon: Icon(Icons.download_outlined),
-              ),
-            ],
-            selected: {_send},
-            onSelectionChanged: (value) => setState(() => _send = value.first),
-          ),
-        ),
-        const SizedBox(height: 20),
-        _DropZone(
-          sending: _send,
-          files: _files,
-          destination: _destination,
-          onPickFiles: _pickFiles,
-          onPickFolder: _pickFolder,
-        ),
-        const SizedBox(height: 16),
-        _deviceNames(),
-        const SizedBox(height: 12),
-        if (_send)
-          FilledButton.icon(
-            onPressed: _files.isEmpty || _selectedPeer == null
-                ? null
-                : _startSend,
-            icon: const Icon(Icons.send_outlined),
-            label: Text(
-              _selectedPeer == null
-                  ? 'Send'
-                  : 'Send to ${_selectedPeer!.alias}',
-            ),
-          )
-        else
-          FilledButton.icon(
-            onPressed: _destination == null || _peers.isEmpty
-                ? null
-                : _startReceive,
-            icon: const Icon(Icons.downloading_outlined),
-            label: Text(
-              _peers.length == 1
-                  ? 'Receive from ${_peers.single.alias}'
-                  : 'Receive from a paired device',
-            ),
-          ),
-        if (snapshot != null) ...[
-          const SizedBox(height: 16),
-          Text(_statusLine(snapshot)),
-          for (final file in snapshot.files)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(file.name),
-              subtitle: Text(
-                '${file.transferred} / ${file.size} bytes · ${file.state.name}',
-              ),
-            ),
-          if (snapshot.status == TransferStatus.awaitingApproval)
-            Wrap(
-              spacing: 8,
-              children: [
-                FilledButton(
-                  onPressed: () => _transfer?.approve(),
-                  child: const Text('Approve and save'),
-                ),
-                OutlinedButton(
-                  onPressed: () => _transfer?.reject(),
-                  child: const Text('Decline'),
-                ),
-              ],
-            ),
-          if (!snapshot.finished && snapshot.status != TransferStatus.idle)
-            OutlinedButton(
-              onPressed: () => _transfer?.stop(),
-              child: const Text('Stop transfer'),
-            ),
-        ],
-        if (_notice != null || _transfer?.message != null) ...[
-          const SizedBox(height: 12),
-          Text(
-            _notice ?? _transfer!.message!,
-            style: TextStyle(color: colors.onSurfaceVariant),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _QueuedFile {
-  const _QueuedFile({
+class PickedTransferFile {
+  const PickedTransferFile({
     required this.path,
     required this.name,
     required this.size,
   });
-
   final String path;
   final String name;
   final int size;
 }
 
-class _DropZone extends StatelessWidget {
-  const _DropZone({
-    required this.sending,
-    required this.files,
-    required this.destination,
-    required this.onPickFiles,
-    required this.onPickFolder,
-  });
+class _TransferPageState extends State<TransferPage> {
+  final _files = <PickedTransferFile>[];
 
-  final bool sending;
-  final List<_QueuedFile> files;
-  final String? destination;
-  final VoidCallback onPickFiles;
-  final VoidCallback onPickFolder;
+  @override
+  void initState() {
+    super.initState();
+    widget.service?.reloadPeers();
+  }
+
+  Future<List<PickedTransferFile>> _defaultPickFiles() async {
+    final picked = await FilePicker.pickFiles(type: FileType.any);
+    return [
+      for (final file in picked)
+        if (file.path != null)
+          PickedTransferFile(
+            path: file.path!,
+            name: file.name,
+            size: file.lengthSync() ?? 0,
+          ),
+    ];
+  }
+
+  Future<void> _chooseFiles() async {
+    final picked = await (widget.pickFiles ?? _defaultPickFiles)();
+    if (!mounted || picked.isEmpty) return;
+    widget.service?.clearSend();
+    setState(() {
+      for (final file in picked) {
+        if (_files.any((item) => item.path == file.path)) continue;
+        _files.add(file);
+      }
+    });
+  }
+
+  Future<void> _changeFolder() async {
+    final service = widget.service;
+    if (service == null) return;
+    final path =
+        await (widget.pickFolder ??
+            () => FilePicker.getDirectoryPath(
+              dialogTitle: 'Choose where received files are saved',
+            ))();
+    if (path == null) return;
+    await service.setFolder(path);
+  }
+
+  Future<void> _sendTo(TrustedPeer peer) async {
+    final service = widget.service;
+    if (service == null || _files.isEmpty || service.sending) return;
+    await service.send(
+      peer: peer,
+      paths: [for (final file in _files) file.path],
+    );
+    if (mounted && service.outgoing.status == TransferStatus.completed) {
+      setState(_files.clear);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final service = widget.service;
+    const header = PageHeader(
+      title: 'Send files',
+      subtitle: 'Choose files, then tap a device. The other device accepts before anything is saved.',
+    );
+    if (service == null) {
+      return const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          SizedBox(height: 16),
+          EmptyPanel(
+            icon: Icons.error_outline,
+            title: 'File transfer is unavailable',
+            message: 'This build does not include the Mirquova native core. Install the full app package.',
+          ),
+        ],
+      );
+    }
+    return ListenableBuilder(
+      listenable: service,
+      builder: (context, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          const SizedBox(height: 16),
+          _ReceiveStatus(service: service, onChangeFolder: _changeFolder),
+          const SizedBox(height: 16),
+          if (service.peers.isEmpty)
+            EmptyPanel(
+              icon: Icons.devices_other_outlined,
+              title: 'No paired devices yet',
+              message: 'Pair once, and the devices can send files to each other any time Mirquova is open on both.',
+              action: FilledButton.icon(
+                onPressed: widget.onOpenPair,
+                icon: const Icon(Icons.radar_outlined),
+                label: const Text('Pair a device'),
+              ),
+            )
+          else ...[
+            _FilesCard(
+              files: _files,
+              enabled: !service.sending,
+              onChoose: _chooseFiles,
+              onRemove: (file) => setState(() => _files.remove(file)),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              _files.isEmpty ? 'Your devices' : 'Tap a device to send',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final peer in service.peers)
+                  _DeviceTile(
+                    peer: peer,
+                    enabled: _files.isNotEmpty && !service.sending,
+                    active:
+                        service.outgoingPeer?.fingerprintSha256 ==
+                        peer.fingerprintSha256,
+                    onTap: () => _sendTo(peer),
+                  ),
+                _AddDeviceTile(onTap: widget.onOpenPair),
+              ],
+            ),
+            if (service.outgoingPeer != null) ...[
+              const SizedBox(height: 20),
+              _SendProgress(service: service),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ReceiveStatus extends StatelessWidget {
+  const _ReceiveStatus({required this.service, required this.onChangeFolder});
+
+  final TransferService service;
+  final VoidCallback onChangeFolder;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final problem = service.receiveProblem;
+    final ready = service.receiving && problem == null;
+    final color = problem != null
+        ? colors.error
+        : ready
+        ? Colors.green.shade600
+        : colors.onSurfaceVariant;
+    final label =
+        problem ??
+        (ready
+            ? 'Ready to receive from paired devices'
+            : service.peers.isEmpty
+            ? 'Pair a device to receive files'
+            : 'Starting…');
+    return SurfaceCard(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Icon(
+            ready ? Icons.wifi_tethering : Icons.wifi_tethering_off,
+            color: color,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w600),
+                ),
+                if (service.folder != null)
+                  Text(
+                    'Saves to ${service.folder}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+              ],
+            ),
+          ),
+          if (service.peers.isNotEmpty)
+            TextButton(
+              onPressed: onChangeFolder,
+              child: const Text('Change folder'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilesCard extends StatelessWidget {
+  const _FilesCard({
+    required this.files,
+    required this.enabled,
+    required this.onChoose,
+    required this.onRemove,
+  });
+
+  final List<PickedTransferFile> files;
+  final bool enabled;
+  final VoidCallback onChoose;
+  final ValueChanged<PickedTransferFile> onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final total = files.fold(0, (sum, file) => sum + file.size);
     return Container(
       width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 220),
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: colors.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(18),
@@ -382,35 +264,219 @@ class _DropZone extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Icon(
-            sending
-                ? Icons.cloud_upload_outlined
-                : Icons.cloud_download_outlined,
-            size: 42,
-            color: colors.primary,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            sending ? 'Files to send' : 'Incoming approval',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            sending
-                ? (files.isEmpty
-                      ? 'Choose files on this device. Nothing is sent until you start the transfer.'
-                      : files.map((file) => file.name).join(', '))
-                : (destination == null
-                      ? 'Choose a folder. Files are written only after you approve an offer.'
-                      : 'Folder ready. Files are written only after you approve an offer.'),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 18),
-          FilledButton.icon(
-            onPressed: sending ? onPickFiles : onPickFolder,
+          if (files.isEmpty) ...[
+            Icon(Icons.upload_file_outlined, size: 40, color: colors.primary),
+            const SizedBox(height: 12),
+            Text(
+              'Choose what to send',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 16),
+          ] else ...[
+            for (final file in files)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.insert_drive_file_outlined),
+                title: Text(
+                  file.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(formatBytes(file.size)),
+                trailing: IconButton(
+                  tooltip: 'Remove ${file.name}',
+                  onPressed: enabled ? () => onRemove(file) : null,
+                  icon: const Icon(Icons.close),
+                ),
+              ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${files.length} ${files.length == 1 ? 'file' : 'files'} · ${formatBytes(total)}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          FilledButton.tonalIcon(
+            onPressed: enabled ? onChoose : null,
             icon: const Icon(Icons.folder_open_outlined),
-            label: Text(sending ? 'Select files' : 'Choose folder'),
+            label: Text(files.isEmpty ? 'Choose files' : 'Add more'),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeviceTile extends StatelessWidget {
+  const _DeviceTile({
+    required this.peer,
+    required this.enabled,
+    required this.active,
+    required this.onTap,
+  });
+
+  final TrustedPeer peer;
+  final bool enabled;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: 'Send to ${peer.alias}',
+      child: Material(
+        color: active ? colors.primaryContainer : colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: enabled ? onTap : null,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 200),
+            opacity: enabled || active ? 1 : 0.55,
+            child: SizedBox(
+              width: 132,
+              height: 120,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: colors.primary,
+                    foregroundColor: colors.onPrimary,
+                    child: const Icon(Icons.devices_outlined),
+                  ),
+                  const SizedBox(height: 10),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      peer.alias,
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AddDeviceTile extends StatelessWidget {
+  const _AddDeviceTile({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: colors.outlineVariant),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: SizedBox(
+          width: 132,
+          height: 120,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.add, size: 28, color: colors.primary),
+              const SizedBox(height: 10),
+              const Text('Pair another'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SendProgress extends StatelessWidget {
+  const _SendProgress({required this.service});
+
+  final TransferService service;
+
+  @override
+  Widget build(BuildContext context) {
+    final snapshot = service.outgoing;
+    final alias = service.outgoingPeer?.alias ?? 'the device';
+    final total = snapshot.totalBytes;
+    final progress = total == 0 ? null : snapshot.transferredBytes / total;
+    final title = switch (snapshot.status) {
+      TransferStatus.connecting => 'Connecting to $alias…',
+      TransferStatus.awaitingApproval => 'Waiting for $alias to accept…',
+      TransferStatus.transferring => 'Sending to $alias',
+      TransferStatus.completed => 'Sent to $alias',
+      _ => service.sendMessage ?? transferStatusMessage(snapshot),
+    };
+    final done = !service.sending;
+    return SurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(switch (snapshot.status) {
+                TransferStatus.completed => Icons.check_circle,
+                TransferStatus.error ||
+                TransferStatus.rejected => Icons.error_outline,
+                _ => Icons.send_outlined,
+              }, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+            ],
+          ),
+          if (!done) ...[
+            const SizedBox(height: 12),
+            LinearProgressIndicator(
+              value: snapshot.status == TransferStatus.transferring
+                  ? progress
+                  : null,
+            ),
+            if (snapshot.status == TransferStatus.transferring &&
+                total > 0) ...[
+              const SizedBox(height: 6),
+              Text(
+                '${formatBytes(snapshot.transferredBytes)} of ${formatBytes(total)}',
+              ),
+            ],
+          ],
+          if (done &&
+              snapshot.status != TransferStatus.completed &&
+              service.sendMessage != null &&
+              title != service.sendMessage) ...[
+            const SizedBox(height: 8),
+            Text(service.sendMessage!),
+          ],
+          const SizedBox(height: 12),
+          done
+              ? TextButton(
+                  onPressed: service.clearSend,
+                  child: const Text('Done'),
+                )
+              : OutlinedButton(
+                  onPressed: service.cancelSend,
+                  child: const Text('Cancel'),
+                ),
         ],
       ),
     );

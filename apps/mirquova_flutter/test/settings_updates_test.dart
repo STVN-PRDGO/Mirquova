@@ -56,8 +56,9 @@ class _Packages extends PackageUpdates {
   }
 
   @override
-  Future<void> open() async {
+  Future<bool> open() async {
     opens++;
+    return true;
   }
 }
 

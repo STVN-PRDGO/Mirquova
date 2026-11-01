@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart';
 
+import '../../adapters/native_transfer.dart' show localDeviceName;
 import '../../adapters/pairing_transport.dart';
 import '../../adapters/pairing_identity.dart';
 import '../../core/discovery_port.dart';
@@ -17,10 +18,20 @@ class PairingPage extends StatefulWidget {
     required this.controller,
     this.discovery,
     this.fetchOffer,
+    this.onTrustChanged,
+    this.onOpenTransfer,
+    this.autoScan = true,
   });
   final PairingController controller;
   final DiscoveryPort? discovery;
   final Future<String> Function(List<String> addresses)? fetchOffer;
+
+  /// Called after a device is saved or revoked.
+  final VoidCallback? onTrustChanged;
+  final VoidCallback? onOpenTransfer;
+
+  /// Opening the page starts scanning and makes this device connectable.
+  final bool autoScan;
 
   @override
   State<PairingPage> createState() => _PairingPageState();
@@ -36,6 +47,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
   String? _connectHint;
   Future<List<TrustedPeer>>? _trustedList;
   PairingOffer? _offer;
+  bool _trustReported = false;
 
   @override
   void initState() {
@@ -43,7 +55,12 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     widget.controller.addListener(_changed);
     _trustedList = widget.controller.trustedPeers.list();
-    _loadAddresses();
+    unawaited(_loadDeviceName());
+    unawaited(
+      _loadAddresses().then((_) {
+        if (mounted && widget.autoScan && !_busy && !_ready) _startScan();
+      }),
+    );
   }
 
   Future<void> _loadAddresses() async {
@@ -59,6 +76,17 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _loadDeviceName() async {
+    if (!Platform.isAndroid) return;
+    final name = await localDeviceName();
+    if (mounted) _alias.text = name;
+  }
+
+  void _startScan() {
+    widget.discovery?.start();
+    unawaited(_readyForDevices());
+  }
+
   void _changed() {
     if (!mounted) return;
     if ({
@@ -71,8 +99,17 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
       unawaited(_closeOffer());
       _ready = false;
     }
-    if (widget.controller.snapshot.status == PairingStatus.paired) {
+    final status = widget.controller.snapshot.status;
+    if (status == PairingStatus.paired) {
       _trustedList = widget.controller.trustedPeers.list();
+      if (!_trustReported &&
+          !widget.controller.savingTrust &&
+          !widget.controller.trustSaveFailed) {
+        _trustReported = true;
+        widget.onTrustChanged?.call();
+      }
+    } else if (status != PairingStatus.idle) {
+      _trustReported = false;
     }
     setState(() {});
   }
@@ -171,7 +208,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
       if (mounted) {
         setState(
           () => _error =
-              'Could not reach ${peer.name}. Press Scan on both devices, then tap the name again.',
+              'Could not reach ${peer.name}. Open Pair devices on both, then tap the name again.',
         );
       }
     } finally {
@@ -268,7 +305,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
               ),
               const SizedBox(height: 8),
               Text(
-                'Press Scan on both devices, then tap a name. The other device approves the request.',
+                'Open this screen on both devices, then tap a name. The other device approves the request.',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: colors.onSurfaceVariant,
                   height: 1.5,
@@ -335,8 +372,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
                               setState(() => _ready = false);
                               return;
                             }
-                            discovery?.start();
-                            unawaited(_readyForDevices());
+                            _startScan();
                           },
                     icon: Icon(
                       scanning || _ready
@@ -408,6 +444,16 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
                   ? 'The connection succeeded, but saving this trusted device failed.'
                   : 'Verified device saved on this device.',
             ),
+            if (widget.onOpenTransfer != null &&
+                !widget.controller.savingTrust &&
+                !widget.controller.trustSaveFailed) ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: widget.onOpenTransfer,
+                icon: const Icon(Icons.send_outlined),
+                label: Text('Send files to ${snapshot.peerAlias ?? 'it'}'),
+              ),
+            ],
           ],
           if (snapshot.awaitingApproval) ...[
             const SizedBox(height: 8),
@@ -513,6 +559,7 @@ class _PairingPageState extends State<PairingPage> with WidgetsBindingObserver {
                           await widget.controller.trustedPeers.revoke(
                             peer.fingerprintSha256,
                           );
+                          widget.onTrustChanged?.call();
                           if (mounted) {
                             setState(
                               () => _trustedList = widget
@@ -638,8 +685,13 @@ class _SectionHeading extends StatelessWidget {
 }
 
 String _plainPairingError(String code) => switch (code) {
-  'bootstrap_connect' || 'mutual_connect' => 'Could not reach the other device. Press Scan on both devices, then tap the name again.',
-  _ => 'Pairing failed ($code).',
+  'bootstrap_connect' || 'mutual_connect' => 'Could not reach the other device. Open Pair devices on both, then tap the name again.',
+  'no_answer' || 'expired' =>
+    'Nobody approved on the other device in time. Tap the name again.',
+  'invitation_rejected' =>
+    'The other device already started a new pairing. Tap the name again.',
+  'invalid_invitation' || 'protocol_mismatch' => 'The other device runs a different Mirquova version. Update both, then try again.',
+  _ => 'The other device stopped answering or is busy with another request. Open Pair devices on both, then tap the name again.',
 };
 
 String _groupFingerprint(String value) => [
