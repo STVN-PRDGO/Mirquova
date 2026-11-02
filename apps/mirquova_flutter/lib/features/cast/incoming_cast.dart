@@ -56,7 +56,7 @@ class _IncomingCastDialogState extends State<IncomingCastDialog> {
       icon: Icon(Icons.cast_rounded, color: theme.colorScheme.primary),
       title: Text('$sender wants to share a screen'),
       content: Text(
-        'This is a Mirquova screen share on $size. Nothing is sent to Chromecast or a TV unless that device is running Mirquova and you accept.',
+        'This is a Mirquova screen share on $size.${snapshot.audio ? ' Accepting also plays that device\'s system audio here. The microphone is not included.' : ''} Nothing is sent to Chromecast or a TV unless that device is running Mirquova and you accept. If you do nothing, this is declined after 60 seconds.',
       ),
       actions: [
         TextButton(
@@ -127,7 +127,29 @@ class _IncomingCastViewerState extends State<IncomingCastViewer> {
         foregroundColor: Colors.white,
         title: Text('Screen from $sender'),
         automaticallyImplyLeading: false,
-        actions: [TextButton(onPressed: _stop, child: const Text('Stop'))],
+        actions: [
+          if (widget.service.incoming.width != null)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  '${widget.service.incoming.width}×${widget.service.incoming.height} · ${widget.service.incoming.frames}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              ),
+            ),
+          IconButton(
+            tooltip: widget.service.playbackMuted ? 'Unmute' : 'Mute',
+            onPressed: () =>
+                widget.service.setPlaybackMuted(!widget.service.playbackMuted),
+            icon: Icon(
+              widget.service.playbackMuted
+                  ? Icons.volume_off_outlined
+                  : Icons.volume_up_outlined,
+            ),
+          ),
+          TextButton(onPressed: _stop, child: const Text('Stop')),
+        ],
       ),
       body: ColoredBox(
         color: Colors.black,

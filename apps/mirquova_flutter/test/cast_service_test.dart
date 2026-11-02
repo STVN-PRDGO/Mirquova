@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mirquova/adapters/native_cast.dart';
 import 'package:mirquova/adapters/pairing_identity.dart';
 import 'package:mirquova/adapters/screen_capture.dart';
+import 'package:mirquova/adapters/system_audio.dart';
 import 'package:mirquova/core/cast_state.dart';
 import 'package:mirquova/features/cast/cast_page.dart';
 import 'package:mirquova/theme.dart';
@@ -34,6 +35,8 @@ class _Api implements CastApi {
   final receiveConfigs = <Map<String, dynamic>>[];
   final sendConfigs = <Map<String, dynamic>>[];
   final pushed = <Uint8List>[];
+  final audioPushed = <Uint8List>[];
+  CastAudioChunk? pendingAudio;
   CastSnapshot receive = const CastSnapshot(status: CastStatus.listening);
   CastSnapshot Function(String host) sendResult = (_) =>
       const CastSnapshot(status: CastStatus.stopped);
@@ -81,6 +84,32 @@ class _Api implements CastApi {
   }
 
   @override
+  bool pushAudio(Uint8List pcm, int sampleRate, int channels) {
+    audioPushed.add(pcm);
+    return sampleRate == 48000 && channels == 2;
+  }
+
+  @override
+  CastAudioChunk? takeAudio() {
+    final chunk = pendingAudio;
+    pendingAudio = null;
+    return chunk;
+  }
+
+  @override
+  int renderAudio(Uint8List out) {
+    final chunk = pendingAudio;
+    pendingAudio = null;
+    if (chunk == null || chunk.pcm.isEmpty) return 0;
+    final count = chunk.pcm.length > out.length ? out.length : chunk.pcm.length;
+    out.setRange(0, count, chunk.pcm);
+    return count;
+  }
+
+  @override
+  void setPlaybackMuted(bool muted) {}
+
+  @override
   Uint8List? latestFrame() => frame;
   @override
   void stopReceive() {}
@@ -109,6 +138,35 @@ class _Capture implements ScreenCapture {
   Future<void> stop() async => started = false;
 }
 
+class _Audio implements SystemAudio {
+  Uint8List? chunk;
+  final played = <Uint8List>[];
+  int captures = 0;
+
+  @override
+  bool get supported => true;
+  @override
+  Future<void> start() async {}
+  @override
+  Future<Uint8List?> captureChunk() async {
+    captures++;
+    final value = chunk;
+    chunk = null;
+    return value;
+  }
+
+  @override
+  Future<void> play(CastAudioChunk chunk) async => played.add(chunk.pcm);
+  @override
+  Future<bool> startClockedPlayback() async => false;
+  @override
+  Future<void> stopCapture() async {}
+  @override
+  Future<void> stopPlayback() async {}
+  @override
+  Future<void> stop() async {}
+}
+
 void main() {
   late _Store store;
   late _Api api;
@@ -120,17 +178,19 @@ void main() {
     trust = PairingTrustRepository(store: store);
   });
 
-  CastService service({ScreenCapture? capture}) => CastService(
-    identities: PairingIdentityRepository(api: _Identity(), store: store),
-    trustedPeers: trust,
-    api: api,
-    capture: capture ?? _Capture(),
-    alias: 'Desk PC',
-    receivePoll: const Duration(milliseconds: 10),
-    frameInterval: const Duration(milliseconds: 10),
-    discoveryWait: const Duration(milliseconds: 50),
-    lastResortHosts: const [],
-  );
+  CastService service({ScreenCapture? capture, SystemAudio? audio}) =>
+      CastService(
+        identities: PairingIdentityRepository(api: _Identity(), store: store),
+        trustedPeers: trust,
+        api: api,
+        capture: capture ?? _Capture(),
+        audio: audio ?? const SilentSystemAudio(),
+        alias: 'Desk PC',
+        receivePoll: const Duration(milliseconds: 10),
+        frameInterval: const Duration(milliseconds: 10),
+        discoveryWait: const Duration(milliseconds: 50),
+        lastResortHosts: const [],
+      );
 
   test('receiving starts on every interface with no setup', () async {
     await trust.trust(alias: 'Pixel', certificateDer: [9, 9, 9]);
@@ -255,5 +315,43 @@ void main() {
     await tester.pump();
     expect(api.sendConfigs.single['peer_ipv4'], '192.168.1.40');
     expect(api.sendConfigs.single['port'], mirquovaCastPort);
+  });
+
+  test('a live share sends system audio and the receiver plays it', () async {
+    await trust.trust(
+      alias: 'Pixel',
+      certificateDer: [9, 9, 9],
+      lanIpv4: '192.168.1.40',
+    );
+    var reads = 0;
+    api.sendResult = (_) {
+      reads++;
+      return reads < 3
+          ? const CastSnapshot(status: CastStatus.casting, audio: true)
+          : const CastSnapshot(status: CastStatus.stopped, audio: true);
+    };
+    final capture = _Capture()
+      ..frame = Uint8List.fromList(const [0xff, 0xd8, 0xff, 0x01]);
+    final sound = _Audio()..chunk = Uint8List.fromList(const [0, 0, 1, 0]);
+    final cast = service(capture: capture, audio: sound);
+    addTearDown(cast.dispose);
+    await cast.reloadPeers();
+
+    await cast.startCast(peer: cast.peers.single);
+
+    expect(api.sendConfigs.single['audio'], isTrue);
+    expect(api.audioPushed.single, Uint8List.fromList(const [0, 0, 1, 0]));
+
+    final listener = service(audio: sound);
+    addTearDown(listener.dispose);
+    await listener.startReceiving();
+    api.receive = const CastSnapshot(status: CastStatus.casting, audio: true);
+    api.pendingAudio = CastAudioChunk(
+      pcm: Uint8List.fromList(const [2, 0, 3, 0]),
+      sampleRate: 48000,
+      channels: 2,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    expect(sound.played.single, Uint8List.fromList(const [2, 0, 3, 0]));
   });
 }

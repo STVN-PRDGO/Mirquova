@@ -39,11 +39,50 @@ class PickedTransferFile {
 
 class _TransferPageState extends State<TransferPage> {
   final _files = <PickedTransferFile>[];
+  int _sampleBytes = 0;
+  DateTime _sampleAt = DateTime.now();
+  double? _bytesPerSecond;
+  bool _sampling = false;
 
   @override
   void initState() {
     super.initState();
+    widget.service?.addListener(_sampleRate);
     widget.service?.reloadPeers();
+  }
+
+  @override
+  void dispose() {
+    widget.service?.removeListener(_sampleRate);
+    super.dispose();
+  }
+
+  void _sampleRate() {
+    final service = widget.service;
+    if (service == null || !mounted) return;
+    final snapshot = service.outgoing;
+    if (snapshot.status != TransferStatus.transferring) {
+      _sampling = false;
+      _sampleBytes = 0;
+      _bytesPerSecond = null;
+      _sampleAt = DateTime.now();
+      return;
+    }
+    if (!_sampling) {
+      _sampling = true;
+      _sampleBytes = snapshot.transferredBytes;
+      _sampleAt = DateTime.now();
+      _bytesPerSecond = null;
+      return;
+    }
+    final now = DateTime.now();
+    final elapsed = now.difference(_sampleAt).inMilliseconds;
+    final bytes = snapshot.transferredBytes;
+    if (elapsed >= 400 && bytes >= _sampleBytes) {
+      _bytesPerSecond = (bytes - _sampleBytes) * 1000 / elapsed;
+      _sampleBytes = bytes;
+      _sampleAt = now;
+    }
   }
 
   Future<List<PickedTransferFile>> _defaultPickFiles() async {
@@ -167,7 +206,7 @@ class _TransferPageState extends State<TransferPage> {
             ),
             if (service.outgoingPeer != null) ...[
               const SizedBox(height: 20),
-              _SendProgress(service: service),
+              _SendProgress(service: service, bytesPerSecond: _bytesPerSecond),
             ],
           ],
         ],
@@ -406,9 +445,10 @@ class _AddDeviceTile extends StatelessWidget {
 }
 
 class _SendProgress extends StatelessWidget {
-  const _SendProgress({required this.service});
+  const _SendProgress({required this.service, required this.bytesPerSecond});
 
   final TransferService service;
+  final double? bytesPerSecond;
 
   @override
   Widget build(BuildContext context) {
@@ -455,9 +495,20 @@ class _SendProgress extends StatelessWidget {
             if (snapshot.status == TransferStatus.transferring &&
                 total > 0) ...[
               const SizedBox(height: 6),
-              Text(
-                '${formatBytes(snapshot.transferredBytes)} of ${formatBytes(total)}',
-              ),
+              Text(_progressLine(snapshot, bytesPerSecond)),
+              if (snapshot.files.length > 1) ...[
+                const SizedBox(height: 8),
+                for (final file in snapshot.files)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      '${file.name} · ${formatBytes(file.transferred)} of ${formatBytes(file.size)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+              ],
             ],
           ],
           if (done &&
@@ -481,4 +532,15 @@ class _SendProgress extends StatelessWidget {
       ),
     );
   }
+}
+
+String _progressLine(TransferSnapshot snapshot, double? bytesPerSecond) {
+  final amount =
+      '${formatBytes(snapshot.transferredBytes)} of ${formatBytes(snapshot.totalBytes)}';
+  final rate = bytesPerSecond == null ? '' : formatTransferRate(bytesPerSecond);
+  final eta = formatTransferEta(
+    snapshot.totalBytes - snapshot.transferredBytes,
+    bytesPerSecond,
+  );
+  return [amount, if (rate.isNotEmpty) rate, ?eta].join(' · ');
 }

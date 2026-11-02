@@ -22,6 +22,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var multicastLock: WifiManager.MulticastLock? = null
     private var captureReply: MethodChannel.Result? = null
+    private var pendingProjection: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -108,13 +109,32 @@ class MainActivity : FlutterActivity() {
                     "startScreenCapture" -> {
                         if (CastCapture.isRunning()) {
                             result.success(true)
-                        } else if (captureReply != null) {
+                        } else if (captureReply != null || pendingProjection != null) {
                             result.error("busy", "A screen-capture prompt is already open.", null)
                         } else {
-                            val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                            captureReply = result
-                            startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_CAST)
+                            requestCapture(result)
                         }
+                    }
+                    "startSystemAudio" -> {
+                        CastCapture.startAudio()
+                        result.success(null)
+                    }
+                    "captureSystemAudio" -> result.success(CastCapture.takeAudio())
+                    "playSystemAudio" -> {
+                        val arguments = call.arguments as? Map<*, *>
+                        val pcm = arguments?.get("pcm") as? ByteArray
+                        val rate = (arguments?.get("sampleRate") as? Number)?.toInt() ?: 0
+                        val channels = (arguments?.get("channels") as? Number)?.toInt() ?: 0
+                        if (pcm != null) CastCapture.playAudio(pcm, rate, channels)
+                        result.success(null)
+                    }
+                    "stopSystemAudioCapture" -> {
+                        CastCapture.stopAudioCapture()
+                        result.success(null)
+                    }
+                    "stopSystemAudioPlayback" -> {
+                        CastCapture.stopAudioPlayback()
+                        result.success(null)
                     }
                     "captureFrame" -> {
                         val frame = CastCapture.latestFrame()
@@ -246,6 +266,36 @@ class MainActivity : FlutterActivity() {
         multicastLock?.let { if (it.isHeld) it.release() }
         multicastLock = null
     }
+    private fun requestCapture(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingProjection = result
+            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQUEST_AUDIO)
+            return
+        }
+        launchProjection(result)
+    }
+
+    private fun launchProjection(result: MethodChannel.Result) {
+        val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        captureReply = result
+        @Suppress("DEPRECATION")
+        startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_CAST)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_AUDIO) return
+        val pending = pendingProjection ?: return
+        pendingProjection = null
+        launchProjection(pending)
+    }
+
     @Deprecated("Required for MediaProjection until the Activity Result API is wired.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -270,11 +320,13 @@ class MainActivity : FlutterActivity() {
     override fun onStop() { releaseMulticast(); super.onStop() }
     override fun onDestroy() {
         captureReply = null
+        pendingProjection = null
         releaseMulticast()
         super.onDestroy()
     }
 
     companion object {
         private const val REQUEST_CAST = 40734
+        private const val REQUEST_AUDIO = 40735
     }
 }

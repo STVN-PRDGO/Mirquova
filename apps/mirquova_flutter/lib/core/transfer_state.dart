@@ -125,6 +125,23 @@ String formatBytes(int bytes) {
   return '${value.toStringAsFixed(digits)} ${units[unit]}';
 }
 
+/// A short rate label such as `12.4 MB/s`. Empty when the sample is too small.
+String formatTransferRate(double bytesPerSecond) {
+  if (bytesPerSecond < 1) return '';
+  return '${formatBytes(bytesPerSecond.round())}/s';
+}
+
+/// Remaining time from the latest rate sample. Null until the rate is usable.
+String? formatTransferEta(int remainingBytes, double? bytesPerSecond) {
+  final rate = bytesPerSecond;
+  if (rate == null || rate < 1 || remainingBytes <= 0) return null;
+  final seconds = (remainingBytes / rate).round();
+  if (seconds < 5) return 'A few seconds left';
+  if (seconds < 90) return 'About $seconds seconds left';
+  final minutes = (seconds / 60).ceil();
+  return minutes == 1 ? 'About 1 minute left' : 'About $minutes minutes left';
+}
+
 String transferStatusMessage(TransferSnapshot snapshot) =>
     switch (snapshot.status) {
       TransferStatus.idle => 'No transfer is running.',

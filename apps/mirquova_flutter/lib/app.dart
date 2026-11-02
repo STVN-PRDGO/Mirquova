@@ -320,6 +320,9 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
       discovery: widget.discovery,
       manualEndpoints: _manualEndpoints,
       onOpen: _open,
+      transfer: _transfer,
+      cast: _cast,
+      playback: _playback,
     ),
     AppSection.transfer => TransferPage(
       service: _transfer,

@@ -376,6 +376,8 @@ struct CastSendStartConfig {
     peer_ca_certificate_der_hex: String,
     width: u32,
     height: u32,
+    #[serde(default)]
+    audio: bool,
 }
 
 fn read_config<T: serde::de::DeserializeOwned>(bytes: *const u8, length: u32) -> Option<T> {
@@ -751,6 +753,7 @@ pub unsafe extern "C" fn mq_cast_send_start(
             &peer_ca,
             config.width,
             config.height,
+            config.audio,
         ) else {
             return 0;
         };
@@ -831,6 +834,107 @@ pub unsafe extern "C" fn mq_cast_push_frame(jpeg: *const u8, jpeg_len: u32) -> i
             .unwrap_or(-1)
     })
     .unwrap_or(-1)
+}
+
+/// # Safety
+/// `out` must reference `out_len` writable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mq_cast_render_audio(out: *mut u8, out_len: u32) -> u32 {
+    if out.is_null() || out_len == 0 || out_len > 64 * 1024 {
+        return 0;
+    }
+    std::panic::catch_unwind(|| {
+        let Ok(manager) = cast_runtime().lock() else {
+            return 0;
+        };
+        let Some(session) = manager.receive.as_ref() else {
+            return 0;
+        };
+        let buffer = unsafe { std::slice::from_raw_parts_mut(out, out_len as usize) };
+        session.render_audio(buffer);
+        out_len
+    })
+    .unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mq_cast_set_playback_muted(muted: i32) {
+    let _ = std::panic::catch_unwind(|| {
+        if let Ok(manager) = cast_runtime().lock()
+            && let Some(session) = manager.receive.as_ref()
+        {
+            session.set_playback_muted(muted != 0);
+        }
+    });
+}
+
+/// # Safety
+/// `pcm` must reference `pcm_len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mq_cast_push_audio(
+    pcm: *const u8,
+    pcm_len: u32,
+    sample_rate: u32,
+    channels: u16,
+) -> i32 {
+    if pcm.is_null() || pcm_len == 0 || pcm_len > 64 * 1024 {
+        return 0;
+    }
+    std::panic::catch_unwind(|| {
+        let bytes = unsafe { std::slice::from_raw_parts(pcm, pcm_len as usize) };
+        cast_runtime()
+            .lock()
+            .map(|manager| {
+                manager.send.as_ref().map_or(0, |session| {
+                    i32::from(session.push_audio(bytes, sample_rate, channels))
+                })
+            })
+            .unwrap_or(-1)
+    })
+    .unwrap_or(-1)
+}
+
+/// # Safety
+/// The out pointers must be writable. Free the returned buffer with `mq_bytes_free`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mq_cast_take_audio(
+    length: *mut u32,
+    sample_rate: *mut u32,
+    channels: *mut u16,
+) -> *mut u8 {
+    if length.is_null() || sample_rate.is_null() || channels.is_null() {
+        return ptr::null_mut();
+    }
+    std::panic::catch_unwind(|| {
+        let chunk = cast_runtime().lock().ok().and_then(|manager| {
+            manager
+                .receive
+                .as_ref()
+                .and_then(CastReceiveSession::take_audio)
+        });
+        match chunk {
+            Some(chunk) if !chunk.pcm.is_empty() => {
+                unsafe {
+                    *length = chunk.pcm.len() as u32;
+                    *sample_rate = chunk.sample_rate;
+                    *channels = chunk.channels;
+                }
+                let mut boxed = chunk.pcm.into_boxed_slice();
+                let pointer = boxed.as_mut_ptr();
+                std::mem::forget(boxed);
+                pointer
+            }
+            _ => {
+                unsafe {
+                    *length = 0;
+                    *sample_rate = 0;
+                    *channels = 0;
+                }
+                ptr::null_mut()
+            }
+        }
+    })
+    .unwrap_or(ptr::null_mut())
 }
 
 /// # Safety

@@ -1,9 +1,11 @@
 //! Consent-gated screen share over mutually authenticated TLS 1.3.
-//! Frames are JPEG stills. This is Mirquova-to-Mirquova, not Chromecast.
+//! Frames are JPEG stills, with optional 16-bit system-audio chunks.
+//! This is Mirquova-to-Mirquova, not Chromecast.
 use crate::{discovery::is_lan_address, pairing::PairingIdentity};
 use rustls::{pki_types::UnixTime, server::danger::ClientCertVerifier};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::VecDeque,
     io::{self, Read, Write},
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream},
     sync::{
@@ -18,6 +20,11 @@ use std::{
 const PROTOCOL_VERSION: u16 = 1;
 const MAX_FRAME_BYTES: usize = 16 * 1024;
 const MAX_JPEG_BYTES: usize = 512 * 1024;
+const MAX_AUDIO_BYTES: usize = 64 * 1024;
+const AUDIO_MAGIC: &[u8] = b"MQA2";
+const AUDIO_HEADER: usize = 18;
+/// 10 ms of 48 kHz stereo 16-bit PCM.
+const AUDIO_10MS: usize = 48_000 / 100 * 2 * 2;
 const IO_TIMEOUT: Duration = Duration::from_secs(15);
 const FRAME_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -62,6 +69,8 @@ pub struct CastSnapshot {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub frames: u64,
+    #[serde(default)]
+    pub audio: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub peer_index: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,6 +116,81 @@ struct Offer {
     mode: String,
     width: u32,
     height: u32,
+    #[serde(default)]
+    audio: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AudioChunk {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub time_us: u64,
+    pub pcm: Vec<u8>,
+}
+
+/// Playback buffer for mirrored system audio. It waits until about 40 ms has
+/// arrived, plays silence and gathers again after a stall, and drops the
+/// oldest sound when more than 200 ms is waiting.
+#[derive(Debug)]
+struct AudioJitter {
+    bytes: VecDeque<u8>,
+    rate: u32,
+    channels: u16,
+    frame: usize,
+    per_ms: usize,
+    waiting: bool,
+}
+
+impl AudioJitter {
+    fn new(rate: u32, channels: u16) -> Self {
+        let channels = if channels == 0 { 2 } else { channels };
+        let frame = 2 * usize::from(channels);
+        Self {
+            bytes: VecDeque::new(),
+            rate,
+            channels,
+            frame,
+            per_ms: frame * rate as usize / 1000,
+            waiting: true,
+        }
+    }
+
+    fn push_format(&mut self, rate: u32, channels: u16, pcm: &[u8]) {
+        if self.rate != rate || self.channels != channels {
+            *self = Self::new(rate, channels);
+        }
+        self.push(pcm);
+    }
+
+    fn push(&mut self, data: &[u8]) {
+        let aligned = data.len() - data.len() % self.frame.max(1);
+        self.bytes.extend(&data[..aligned]);
+        let most = self.per_ms.saturating_mul(200);
+        let keep = self.per_ms.saturating_mul(60);
+        if self.per_ms > 0 && self.bytes.len() > most {
+            let drop = self.bytes.len().saturating_sub(keep) / self.frame * self.frame;
+            self.bytes.drain(..drop);
+        }
+    }
+
+    fn fill(&mut self, out: &mut [u8]) {
+        if self.waiting && self.bytes.len() >= self.per_ms.saturating_mul(40) {
+            self.waiting = false;
+        }
+        let mut filled = 0;
+        if !self.waiting {
+            filled = out.len().min(self.bytes.len()) / self.frame.max(1) * self.frame;
+            if filled > 0 {
+                for (index, byte) in self.bytes.drain(..filled).enumerate() {
+                    out[index] = byte;
+                }
+            }
+            if filled < out.len() {
+                self.waiting = true;
+            }
+        }
+        out[filled..].fill(0);
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -121,6 +205,9 @@ pub struct ReceiveSession {
     endpoint: SocketAddrV4,
     state: SharedState,
     latest: Arc<Mutex<Option<Vec<u8>>>>,
+    audio: Arc<Mutex<VecDeque<AudioChunk>>>,
+    playback: Arc<Mutex<AudioJitter>>,
+    playback_muted: Arc<AtomicBool>,
     cancel: Arc<AtomicBool>,
     decision: SyncSender<bool>,
     worker: Option<JoinHandle<()>>,
@@ -157,9 +244,14 @@ impl ReceiveSession {
         let cancel = Arc::new(AtomicBool::new(false));
         let (decision, decision_rx) = mpsc::sync_channel(1);
         let latest = Arc::new(Mutex::new(None));
+        let audio = Arc::new(Mutex::new(VecDeque::new()));
+        let playback = Arc::new(Mutex::new(AudioJitter::new(48_000, 2)));
+        let playback_muted = Arc::new(AtomicBool::new(false));
         let worker_state = state.clone();
         let worker_cancel = Arc::clone(&cancel);
         let worker_latest = Arc::clone(&latest);
+        let worker_audio = Arc::clone(&audio);
+        let worker_playback = Arc::clone(&playback);
         let worker = thread::Builder::new()
             .name("mirquova-cast-receive".into())
             .spawn(move || {
@@ -168,7 +260,11 @@ impl ReceiveSession {
                     config,
                     verifiers,
                     worker_state,
-                    worker_latest,
+                    ReceivePipes {
+                        latest: worker_latest,
+                        audio: worker_audio,
+                        playback: worker_playback,
+                    },
                     worker_cancel,
                     decision_rx,
                 );
@@ -178,6 +274,9 @@ impl ReceiveSession {
             endpoint,
             state,
             latest,
+            audio,
+            playback,
+            playback_muted,
             cancel,
             decision,
             worker: Some(worker),
@@ -197,6 +296,27 @@ impl ReceiveSession {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .clone()
+    }
+
+    pub fn take_audio(&self) -> Option<AudioChunk> {
+        self.audio
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .pop_front()
+    }
+
+    pub fn set_playback_muted(&self, muted: bool) {
+        self.playback_muted.store(muted, Ordering::Release);
+    }
+
+    pub fn render_audio(&self, out: &mut [u8]) {
+        self.playback
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .fill(out);
+        if self.playback_muted.load(Ordering::Acquire) {
+            out.fill(0);
+        }
     }
 
     pub fn approve(&self) -> bool {
@@ -233,6 +353,8 @@ pub struct SendSession {
     state: SharedState,
     cancel: Arc<AtomicBool>,
     pending: Arc<Mutex<Option<Vec<u8>>>>,
+    pending_audio: Arc<Mutex<VecDeque<AudioChunk>>>,
+    audio_tail: Mutex<Vec<u8>>,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -244,6 +366,7 @@ impl SendSession {
         peer_ca: &[u8],
         width: u32,
         height: u32,
+        audio: bool,
     ) -> Result<Self, CastStartError> {
         if !is_lan_address(peer_ipv4)
             || port == 0
@@ -260,21 +383,33 @@ impl SendSession {
             value.endpoint = Some(SocketAddrV4::new(peer_ipv4, port).to_string());
             value.width = Some(width);
             value.height = Some(height);
+            value.audio = audio;
         });
         let cancel = Arc::new(AtomicBool::new(false));
         let pending = Arc::new(Mutex::new(None));
+        let pending_audio = Arc::new(Mutex::new(VecDeque::new()));
         let worker_state = state.clone();
         let worker_cancel = Arc::clone(&cancel);
         let worker_pending = Arc::clone(&pending);
+        let worker_audio = Arc::clone(&pending_audio);
         let worker = thread::Builder::new()
             .name("mirquova-cast-send".into())
             .spawn(move || {
                 send_worker(
                     SocketAddrV4::new(peer_ipv4, port),
                     config,
-                    width,
-                    height,
-                    worker_pending,
+                    Offer {
+                        version: PROTOCOL_VERSION,
+                        purpose: "cast-offer".to_owned(),
+                        mode: "mirror".to_owned(),
+                        width,
+                        height,
+                        audio,
+                    },
+                    SendPipes {
+                        pending: worker_pending,
+                        audio: worker_audio,
+                    },
                     worker_state,
                     worker_cancel,
                 );
@@ -284,6 +419,8 @@ impl SendSession {
             state,
             cancel,
             pending,
+            pending_audio,
+            audio_tail: Mutex::new(Vec::new()),
             worker: Some(worker),
         })
     }
@@ -306,6 +443,34 @@ impl SendSession {
         true
     }
 
+    pub fn push_audio(&self, pcm: &[u8], sample_rate: u32, channels: u16) -> bool {
+        if !valid_pcm(sample_rate, channels, pcm) {
+            return false;
+        }
+        if self.state.snapshot().status != CastStatus::Casting {
+            return false;
+        }
+        let mut tail = self
+            .audio_tail
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let mut queue = self
+            .pending_audio
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if sample_rate == 48_000 && channels == 2 && (pcm.len() >= AUDIO_10MS || !tail.is_empty()) {
+            tail.extend_from_slice(pcm);
+            while tail.len() >= AUDIO_10MS {
+                let packet: Vec<u8> = tail.drain(..AUDIO_10MS).collect();
+                queue_audio(&mut queue, sample_rate, channels, packet);
+            }
+        } else {
+            queue_audio(&mut queue, sample_rate, channels, pcm.to_vec());
+        }
+        trim_audio_queue(&mut queue);
+        true
+    }
+
     pub fn stop(&mut self) {
         self.cancel.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take() {
@@ -325,12 +490,23 @@ impl Drop for SendSession {
     }
 }
 
+struct ReceivePipes {
+    latest: Arc<Mutex<Option<Vec<u8>>>>,
+    audio: Arc<Mutex<VecDeque<AudioChunk>>>,
+    playback: Arc<Mutex<AudioJitter>>,
+}
+
+struct SendPipes {
+    pending: Arc<Mutex<Option<Vec<u8>>>>,
+    audio: Arc<Mutex<VecDeque<AudioChunk>>>,
+}
+
 fn receive_worker(
     listener: TcpListener,
     config: std::sync::Arc<rustls::ServerConfig>,
     verifiers: Vec<Arc<dyn ClientCertVerifier>>,
     state: SharedState,
-    latest: Arc<Mutex<Option<Vec<u8>>>>,
+    pipes: ReceivePipes,
     cancel: Arc<AtomicBool>,
     decision_rx: Receiver<bool>,
 ) {
@@ -393,6 +569,7 @@ fn receive_worker(
         value.status = CastStatus::AwaitingApproval;
         value.width = Some(offer.width);
         value.height = Some(offer.height);
+        value.audio = offer.audio;
     });
     let accept = wait_for_decision(&decision_rx, &cancel);
     if cancel.load(Ordering::Acquire) {
@@ -432,12 +609,29 @@ fn receive_worker(
         if cancel.load(Ordering::Acquire) {
             return;
         }
-        match read_jpeg(&mut stream) {
-            Ok(frame) => {
+        match read_packet(&mut stream) {
+            Ok(Packet::Frame(frame)) => {
                 {
-                    *latest.lock().unwrap_or_else(|error| error.into_inner()) = Some(frame);
+                    *pipes
+                        .latest
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner()) = Some(frame);
                 }
                 state.update(|value| value.frames = value.frames.saturating_add(1));
+            }
+            Ok(Packet::Audio(chunk)) => {
+                pipes
+                    .playback
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .push_format(chunk.sample_rate, chunk.channels, &chunk.pcm);
+                let mut queue = pipes
+                    .audio
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                trim_audio_queue(&mut queue);
+                queue.push_back(chunk);
+                trim_audio_queue(&mut queue);
             }
             Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
                 state.update(|value| {
@@ -473,9 +667,8 @@ fn receive_worker(
 fn send_worker(
     endpoint: SocketAddrV4,
     config: std::sync::Arc<rustls::ClientConfig>,
-    width: u32,
-    height: u32,
-    pending: Arc<Mutex<Option<Vec<u8>>>>,
+    offer: Offer,
+    pipes: SendPipes,
     state: SharedState,
     cancel: Arc<AtomicBool>,
 ) {
@@ -496,13 +689,6 @@ fn send_worker(
             state.fail("tls_failed");
             return;
         }
-    };
-    let offer = Offer {
-        version: PROTOCOL_VERSION,
-        purpose: "cast-offer".to_owned(),
-        mode: "mirror".to_owned(),
-        width,
-        height,
     };
     if write_json(&mut stream, &offer).is_err() {
         state.fail("network");
@@ -551,22 +737,38 @@ fn send_worker(
         if cancel.load(Ordering::Acquire) {
             return;
         }
-        let frame = pending
+        let frame = pipes
+            .pending
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .take();
-        match frame {
-            Some(frame) => {
-                if write_jpeg(&mut stream, &frame).is_err() {
-                    if cancel.load(Ordering::Acquire) {
-                        return;
-                    }
-                    state.fail("network");
+        let chunk = pipes
+            .audio
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .pop_front();
+        if frame.is_none() && chunk.is_none() {
+            thread::sleep(ACCEPT_POLL);
+            continue;
+        }
+        if let Some(frame) = frame {
+            if write_jpeg(&mut stream, &frame).is_err() {
+                if cancel.load(Ordering::Acquire) {
                     return;
                 }
-                state.update(|value| value.frames = value.frames.saturating_add(1));
+                state.fail("network");
+                return;
             }
-            None => thread::sleep(ACCEPT_POLL),
+            state.update(|value| value.frames = value.frames.saturating_add(1));
+        }
+        if let Some(chunk) = chunk
+            && write_audio(&mut stream, &chunk).is_err()
+        {
+            if cancel.load(Ordering::Acquire) {
+                return;
+            }
+            state.fail("network");
+            return;
         }
     }
 }
@@ -656,6 +858,99 @@ fn read_json<T: for<'de> Deserialize<'de>>(stream: &mut impl Read) -> io::Result
     serde_json::from_slice(&bytes).map_err(|_| invalid_data())
 }
 
+enum Packet {
+    Frame(Vec<u8>),
+    Audio(AudioChunk),
+}
+
+fn queue_audio(queue: &mut VecDeque<AudioChunk>, rate: u32, channels: u16, pcm: Vec<u8>) {
+    let time_us = queue.back().map(|chunk| chunk.time_us).unwrap_or(0)
+        + pcm_duration_us(rate, channels, pcm.len());
+    queue.push_back(AudioChunk {
+        sample_rate: rate,
+        channels,
+        time_us,
+        pcm,
+    });
+}
+
+fn pcm_duration_us(rate: u32, channels: u16, bytes: usize) -> u64 {
+    let frame = 2 * usize::from(channels.max(1));
+    if rate == 0 || frame == 0 {
+        return 0;
+    }
+    (bytes / frame) as u64 * 1_000_000 / u64::from(rate)
+}
+
+fn trim_audio_queue(queue: &mut VecDeque<AudioChunk>) {
+    let Some(last) = queue.back() else {
+        return;
+    };
+    let frame = 2 * usize::from(last.channels.max(1));
+    let per_ms = frame * last.sample_rate as usize / 1000;
+    if per_ms == 0 {
+        return;
+    }
+    let most = per_ms * 200;
+    let keep = per_ms * 60;
+    let mut total: usize = queue.iter().map(|chunk| chunk.pcm.len()).sum();
+    if total <= most {
+        return;
+    }
+    while total > keep {
+        let Some(front) = queue.pop_front() else {
+            break;
+        };
+        total = total.saturating_sub(front.pcm.len());
+    }
+}
+
+fn valid_pcm(sample_rate: u32, channels: u16, pcm: &[u8]) -> bool {
+    matches!(sample_rate, 8_000 | 16_000 | 22_050 | 44_100 | 48_000)
+        && matches!(channels, 1 | 2)
+        && !pcm.is_empty()
+        && pcm.len() <= MAX_AUDIO_BYTES
+        && pcm.len().is_multiple_of(channels as usize * 2)
+}
+
+fn write_audio(stream: &mut impl Write, chunk: &AudioChunk) -> io::Result<()> {
+    if !valid_pcm(chunk.sample_rate, chunk.channels, &chunk.pcm) {
+        return Err(invalid_data());
+    }
+    let mut payload = Vec::with_capacity(AUDIO_HEADER + chunk.pcm.len());
+    payload.extend_from_slice(AUDIO_MAGIC);
+    payload.extend_from_slice(&chunk.sample_rate.to_le_bytes());
+    payload.extend_from_slice(&chunk.channels.to_le_bytes());
+    payload.extend_from_slice(&chunk.time_us.to_le_bytes());
+    payload.extend_from_slice(&chunk.pcm);
+    stream.write_all(&(payload.len() as u32).to_be_bytes())?;
+    stream.write_all(&payload)?;
+    stream.flush()
+}
+
+fn read_packet(stream: &mut impl Read) -> io::Result<Packet> {
+    let bytes = read_bounded(stream, MAX_JPEG_BYTES)?;
+    if is_jpeg(&bytes) {
+        return Ok(Packet::Frame(bytes));
+    }
+    if bytes.len() < AUDIO_HEADER || &bytes[..AUDIO_MAGIC.len()] != AUDIO_MAGIC {
+        return Err(invalid_data());
+    }
+    let sample_rate = u32::from_le_bytes(bytes[4..8].try_into().map_err(|_| invalid_data())?);
+    let channels = u16::from_le_bytes(bytes[8..10].try_into().map_err(|_| invalid_data())?);
+    let time_us = u64::from_le_bytes(bytes[10..18].try_into().map_err(|_| invalid_data())?);
+    let pcm = bytes[AUDIO_HEADER..].to_vec();
+    if !valid_pcm(sample_rate, channels, &pcm) {
+        return Err(invalid_data());
+    }
+    Ok(Packet::Audio(AudioChunk {
+        sample_rate,
+        channels,
+        time_us,
+        pcm,
+    }))
+}
+
 fn write_jpeg(stream: &mut impl Write, jpeg: &[u8]) -> io::Result<()> {
     if !is_jpeg(jpeg) || jpeg.len() > MAX_JPEG_BYTES {
         return Err(invalid_data());
@@ -663,14 +958,6 @@ fn write_jpeg(stream: &mut impl Write, jpeg: &[u8]) -> io::Result<()> {
     stream.write_all(&(jpeg.len() as u32).to_be_bytes())?;
     stream.write_all(jpeg)?;
     stream.flush()
-}
-
-fn read_jpeg(stream: &mut impl Read) -> io::Result<Vec<u8>> {
-    let bytes = read_bounded(stream, MAX_JPEG_BYTES)?;
-    if !is_jpeg(&bytes) {
-        return Err(invalid_data());
-    }
-    Ok(bytes)
 }
 
 fn read_bounded(stream: &mut impl Read, max: usize) -> io::Result<Vec<u8>> {
@@ -709,6 +996,45 @@ mod tests {
     ];
 
     #[test]
+    fn sound_waits_for_forty_milliseconds_then_plays() {
+        let mut jitter = AudioJitter::new(48_000, 2);
+        let ms = 192;
+        let mut out = vec![9u8; 10 * ms];
+        jitter.push(&vec![1; 30 * ms]);
+        jitter.fill(&mut out);
+        assert!(out.iter().all(|byte| *byte == 0));
+        jitter.push(&vec![1; 10 * ms]);
+        jitter.fill(&mut out);
+        assert!(out.iter().all(|byte| *byte == 1));
+    }
+
+    #[test]
+    fn a_stall_plays_silence_and_gathers_again() {
+        let mut jitter = AudioJitter::new(48_000, 2);
+        let ms = 192;
+        jitter.push(&vec![1; 45 * ms]);
+        let mut out = vec![9u8; 50 * ms];
+        jitter.fill(&mut out);
+        assert!(out[..45 * ms].iter().all(|byte| *byte == 1));
+        assert!(out[45 * ms..].iter().all(|byte| *byte == 0));
+        jitter.push(&vec![2; 10 * ms]);
+        let mut again = vec![9u8; 5 * ms];
+        jitter.fill(&mut again);
+        assert!(again.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn late_sound_drops_the_oldest_whole_frames() {
+        let mut jitter = AudioJitter::new(48_000, 2);
+        let ms = 192;
+        jitter.push(&vec![1; 150 * ms]);
+        jitter.push(&vec![2; 60 * ms]);
+        assert_eq!(jitter.bytes.len(), 60 * ms);
+        assert_eq!(jitter.bytes.len() % 4, 0);
+        assert!(jitter.bytes.iter().all(|byte| *byte == 2));
+    }
+
+    #[test]
     fn jpeg_magic_rejects_non_images() {
         assert!(is_jpeg(TINY_JPEG));
         assert!(!is_jpeg(b"not-a-jpeg"));
@@ -723,6 +1049,7 @@ mod tests {
             mode: "mirror".to_owned(),
             width: 0,
             height: 720,
+            audio: false,
         };
         assert!(matches!(validate_offer(&offer), Err("protocol")));
     }
@@ -758,6 +1085,7 @@ mod tests {
             &receiver_ca,
             1280,
             720,
+            true,
         )
         .unwrap();
         wait_until(&send, CastStatus::AwaitingApproval);
@@ -784,6 +1112,7 @@ mod tests {
             &receiver_ca,
             640,
             360,
+            true,
         )
         .unwrap();
         wait_until(&receive, CastStatus::AwaitingApproval);
@@ -802,6 +1131,23 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(receive.latest_frame().as_deref(), Some(TINY_JPEG));
+        let mut pcm = Vec::new();
+        for sample in [0_i16, 1000, -1000, 0] {
+            pcm.extend_from_slice(&sample.to_le_bytes());
+        }
+        assert!(!send.push_audio(&[1, 2, 3], 48_000, 2));
+        let mut heard = None;
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while heard.is_none() && Instant::now() < deadline {
+            assert!(send.push_audio(&pcm, 48_000, 2));
+            heard = receive.take_audio();
+            thread::sleep(Duration::from_millis(20));
+        }
+        let heard = heard.expect("system audio");
+        assert_eq!(heard.sample_rate, 48_000);
+        assert_eq!(heard.channels, 2);
+        assert_eq!(heard.pcm, pcm);
+        assert!(receive.snapshot().audio);
     }
 
     fn wait_until(session: &impl Snap, status: CastStatus) {

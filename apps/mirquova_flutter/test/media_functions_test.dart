@@ -132,6 +132,17 @@ Next
     expect(playback.hasMedia, isFalse);
     expect(engine.disposed, isTrue);
   });
+
+  test('transfer rate and remaining time stay quiet until a sample exists', () {
+    expect(formatTransferRate(0), isEmpty);
+    expect(formatTransferEta(1000, null), isNull);
+    expect(formatTransferRate(12.4 * 1024 * 1024), '12.4 MB/s');
+    expect(
+      formatTransferEta(30 * 1024 * 1024, 1024 * 1024),
+      'About 30 seconds left',
+    );
+    expect(formatTransferEta(100, 10 * 1024), 'A few seconds left');
+  });
 }
 
 class _Transport implements OpenSubtitleTransport {

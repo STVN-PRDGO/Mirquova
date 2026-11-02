@@ -11,6 +11,7 @@ import '../core/discovery_port.dart';
 import 'native_transfer.dart';
 import 'pairing_identity.dart';
 import 'screen_capture.dart';
+import 'system_audio.dart';
 
 typedef _StartNative = Int32 Function(
   Pointer<Uint8>,
@@ -38,6 +39,27 @@ typedef _FreeNative = Void Function(Pointer<Utf8>);
 typedef _Free = void Function(Pointer<Utf8>);
 typedef _PushNative = Int32 Function(Pointer<Uint8>, Uint32);
 typedef _Push = int Function(Pointer<Uint8>, int);
+typedef _PushAudioNative = Int32 Function(
+  Pointer<Uint8>,
+  Uint32,
+  Uint32,
+  Uint16,
+);
+typedef _PushAudio = int Function(Pointer<Uint8>, int, int, int);
+typedef _TakeAudioNative = Pointer<Uint8> Function(
+  Pointer<Uint32>,
+  Pointer<Uint32>,
+  Pointer<Uint16>,
+);
+typedef _TakeAudio = Pointer<Uint8> Function(
+  Pointer<Uint32>,
+  Pointer<Uint32>,
+  Pointer<Uint16>,
+);
+typedef _RenderNative = Uint32 Function(Pointer<Uint8>, Uint32);
+typedef _Render = int Function(Pointer<Uint8>, int);
+typedef _MuteNative = Void Function(Int32);
+typedef _Mute = void Function(int);
 typedef _LatestNative = Pointer<Uint8> Function(Pointer<Uint32>);
 typedef _Latest = Pointer<Uint8> Function(Pointer<Uint32>);
 typedef _BytesFreeNative = Void Function(Pointer<Uint8>, Uint32);
@@ -57,7 +79,11 @@ abstract interface class CastApi {
   bool approve();
   bool reject();
   bool pushFrame(Uint8List jpeg);
+  bool pushAudio(Uint8List pcm, int sampleRate, int channels);
   Uint8List? latestFrame();
+  CastAudioChunk? takeAudio();
+  int renderAudio(Uint8List out);
+  void setPlaybackMuted(bool muted);
   void stopReceive();
   void stopSend();
 }
@@ -98,6 +124,18 @@ class NativeCastApi implements CastApi {
       'mq_cast_send_snapshot',
     );
     _push = library.lookupFunction<_PushNative, _Push>('mq_cast_push_frame');
+    _pushAudio = library.lookupFunction<_PushAudioNative, _PushAudio>(
+      'mq_cast_push_audio',
+    );
+    _takeAudio = library.lookupFunction<_TakeAudioNative, _TakeAudio>(
+      'mq_cast_take_audio',
+    );
+    _renderAudio = library.lookupFunction<_RenderNative, _Render>(
+      'mq_cast_render_audio',
+    );
+    _setMuted = library.lookupFunction<_MuteNative, _Mute>(
+      'mq_cast_set_playback_muted',
+    );
     _latest = library.lookupFunction<_LatestNative, _Latest>(
       'mq_cast_latest_frame',
     );
@@ -118,6 +156,10 @@ class NativeCastApi implements CastApi {
   late final _Snapshot _receiveSnapshot;
   late final _Snapshot _sendSnapshot;
   late final _Push _push;
+  late final _PushAudio _pushAudio;
+  late final _TakeAudio _takeAudio;
+  late final _Render _renderAudio;
+  late final _Mute _setMuted;
   late final _Latest _latest;
   late final _BytesFree _bytesFree;
   late final _Stop _receiveStop;
@@ -198,6 +240,61 @@ class NativeCastApi implements CastApi {
   }
 
   @override
+  bool pushAudio(Uint8List pcm, int sampleRate, int channels) {
+    final pointer = _copy(pcm);
+    try {
+      return _pushAudio(pointer, pcm.length, sampleRate, channels) == 1;
+    } finally {
+      calloc.free(pointer);
+    }
+  }
+
+  @override
+  CastAudioChunk? takeAudio() {
+    final length = calloc<Uint32>();
+    final rate = calloc<Uint32>();
+    final channels = calloc<Uint16>();
+    try {
+      final pointer = _takeAudio(length, rate, channels);
+      final size = length.value;
+      if (pointer == nullptr || size == 0) return null;
+      try {
+        return CastAudioChunk(
+          pcm: Uint8List.fromList(pointer.asTypedList(size)),
+          sampleRate: rate.value,
+          channels: channels.value,
+        );
+      } finally {
+        _bytesFree(pointer, size);
+      }
+    } finally {
+      calloc.free(length);
+      calloc.free(rate);
+      calloc.free(channels);
+    }
+  }
+
+  @override
+  @override
+  int renderAudio(Uint8List out) {
+    if (out.isEmpty) return 0;
+    final pointer = calloc<Uint8>(out.length);
+    try {
+      final filled = _renderAudio(pointer, out.length);
+      if (filled <= 0) return 0;
+      final count = filled > out.length ? out.length : filled;
+      out.setRange(0, count, pointer.asTypedList(count));
+      return count;
+    } finally {
+      calloc.free(pointer);
+    }
+  }
+
+  @override
+  @override
+  void setPlaybackMuted(bool muted) => _setMuted(muted ? 1 : 0);
+
+  @override
   Uint8List? latestFrame() {
     final length = calloc<Uint32>();
     try {
@@ -228,6 +325,7 @@ class CastService extends ChangeNotifier {
     required this.trustedPeers,
     CastApi? api,
     ScreenCapture? capture,
+    SystemAudio? audio,
     this.discovery,
     String? alias,
     this.receivePoll = const Duration(milliseconds: 80),
@@ -237,6 +335,7 @@ class CastService extends ChangeNotifier {
     List<String>? lastResortHosts,
   }) : _api = api ?? NativeCastApi(),
        _capture = capture ?? PlatformScreenCapture(),
+       _systemAudio = audio ?? PlatformSystemAudio(),
        _aliasOverride = alias,
        _lastResortHosts =
            lastResortHosts ?? (Platform.isAndroid ? ['10.0.2.2'] : const []);
@@ -250,6 +349,7 @@ class CastService extends ChangeNotifier {
   final Duration frameInterval;
   final CastApi _api;
   final ScreenCapture _capture;
+  final SystemAudio _systemAudio;
   final String? _aliasOverride;
   String? _alias;
   final List<String> _lastResortHosts;
@@ -262,12 +362,15 @@ class CastService extends ChangeNotifier {
   bool _disposed = false;
   List<TrustedPeer> _armedPeers = const [];
   Timer? _receiveTimer;
+  Timer? _audioTimer;
   Timer? _retryTimer;
   Timer? _presenceTimer;
   String? receiveProblem;
   CastSnapshot incoming = const CastSnapshot();
   TrustedPeer? incomingPeer;
   bool _addressRecorded = false;
+  bool _hearing = false;
+  bool playbackMuted = false;
   Uint8List? incomingFrame;
   String? lastIncomingMessage;
 
@@ -285,6 +388,13 @@ class CastService extends ChangeNotifier {
       incoming.status == CastStatus.awaitingApproval;
   bool get incomingLive => incoming.status == CastStatus.casting;
   bool get captureSupported => _capture.supported;
+  bool get audioSupported => _systemAudio.supported;
+
+  void setPlaybackMuted(bool muted) {
+    playbackMuted = muted;
+    _api.setPlaybackMuted(muted);
+    _notify();
+  }
 
   Future<void> startReceiving() async {
     _wanted = true;
@@ -387,6 +497,7 @@ class CastService extends ChangeNotifier {
   void _disarm() {
     _receiveTimer?.cancel();
     _receiveTimer = null;
+    _stopPlaybackClock();
     if (_armed) _api.stopReceive();
     _armed = false;
     incoming = const CastSnapshot();
@@ -433,6 +544,13 @@ class CastService extends ChangeNotifier {
     }
     if (snapshot.status == CastStatus.casting) {
       incomingFrame = _api.latestFrame() ?? incomingFrame;
+      if (!_hearing) {
+        _hearing = true;
+        unawaited(_startPlaybackClock());
+      }
+    } else if (_hearing) {
+      _hearing = false;
+      _stopPlaybackClock();
     }
     final changed =
         snapshot.status != incoming.status ||
@@ -453,6 +571,37 @@ class CastService extends ChangeNotifier {
       return;
     }
     if (changed) _notify();
+  }
+
+  Future<void> _startPlaybackClock() async {
+    final native = await _systemAudio.startClockedPlayback();
+    if (!_hearing || _disposed) {
+      if (native) unawaited(_systemAudio.stopPlayback());
+      return;
+    }
+    if (native) return;
+    _audioTimer?.cancel();
+    _audioTimer = Timer.periodic(const Duration(milliseconds: 10), (_) {
+      if (!_hearing || _disposed) return;
+      final out = Uint8List(1920);
+      final filled = _api.renderAudio(out);
+      if (filled <= 0) return;
+      unawaited(
+        _systemAudio.play(
+          CastAudioChunk(
+            pcm: Uint8List.fromList(out.sublist(0, filled)),
+            sampleRate: 48000,
+            channels: 2,
+          ),
+        ),
+      );
+    });
+  }
+
+  void _stopPlaybackClock() {
+    _audioTimer?.cancel();
+    _audioTimer = null;
+    unawaited(_systemAudio.stopPlayback());
   }
 
   Future<void> _recordAddress(TrustedPeer peer, String address) async {
@@ -483,6 +632,7 @@ class CastService extends ChangeNotifier {
     outgoing = const CastSnapshot(status: CastStatus.connecting);
     _notify();
     final allowed = await _capture.start();
+    if (allowed) await _systemAudio.start();
     if (generation != _sendGeneration) return;
     if (!allowed) {
       outgoing = const CastSnapshot(
@@ -522,6 +672,7 @@ class CastService extends ChangeNotifier {
     _sendGeneration++;
     _api.stopSend();
     unawaited(_capture.stop());
+    unawaited(_systemAudio.stopCapture());
     outgoing = const CastSnapshot(status: CastStatus.stopped);
     sendMessage = castStatusMessage(outgoing);
     _notify();
@@ -548,6 +699,7 @@ class CastService extends ChangeNotifier {
 
   Future<void> _finishSend(CastSnapshot result, TrustedPeer peer) async {
     await _capture.stop();
+    await _systemAudio.stopCapture();
     outgoing = result;
     sendMessage = switch (result.status) {
       CastStatus.stopped => 'Stopped sharing to ${peer.alias}.',
@@ -574,6 +726,7 @@ class CastService extends ChangeNotifier {
       'peer_ca_certificate_der_hex': _hex(base64Decode(peer.certificateDer)),
       'width': 1280,
       'height': 720,
+      'audio': _systemAudio.supported,
     });
     final started = _api.startSend(configJson: config, identity: identity);
     identity.clearPrivateKeyCopy();
@@ -595,6 +748,8 @@ class CastService extends ChangeNotifier {
       if (snapshot.status == CastStatus.casting) {
         final frame = await _capture.captureFrame();
         if (frame != null) _api.pushFrame(frame);
+        final pcm = await _systemAudio.captureChunk();
+        if (pcm != null) _api.pushAudio(pcm, 48000, 2);
       }
       if (snapshot.finished) return snapshot;
       outgoing = snapshot;
@@ -638,7 +793,9 @@ class CastService extends ChangeNotifier {
     _retryTimer?.cancel();
     _presenceTimer?.cancel();
     _receiveTimer?.cancel();
+    _audioTimer?.cancel();
     unawaited(_capture.stop());
+    unawaited(_systemAudio.stop());
     _api.stopSend();
     _api.stopReceive();
     super.dispose();

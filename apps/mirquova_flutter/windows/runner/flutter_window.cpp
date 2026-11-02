@@ -11,6 +11,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "screen_capture.h"
+#include "system_audio.h"
 
 namespace {
 
@@ -106,6 +107,51 @@ bool FlutterWindow::OnCreate() {
           if (reinterpret_cast<INT_PTR>(opened) <= 32) {
             result->Error("package_unavailable", "The downloaded package could not be opened.");
           } else { result->Success(); }
+        } else if (call.method_name() == "startSystemAudio") {
+          StartSystemAudio();
+          result->Success();
+        } else if (call.method_name() == "captureSystemAudio") {
+          const std::vector<uint8_t> pcm = CaptureSystemAudio();
+          if (pcm.empty()) {
+            result->Success();
+          } else {
+            result->Success(flutter::EncodableValue(pcm));
+          }
+        } else if (call.method_name() == "playSystemAudio") {
+          const auto* arguments = call.arguments();
+          const auto* map =
+              arguments ? std::get_if<flutter::EncodableMap>(arguments) : nullptr;
+          if (map != nullptr) {
+            const auto pcm_entry = map->find(flutter::EncodableValue("pcm"));
+            const auto rate_entry = map->find(flutter::EncodableValue("sampleRate"));
+            const auto channel_entry = map->find(flutter::EncodableValue("channels"));
+            const auto* pcm =
+                pcm_entry == map->end()
+                    ? nullptr
+                    : std::get_if<std::vector<uint8_t>>(&pcm_entry->second);
+            const auto* rate = rate_entry == map->end()
+                                   ? nullptr
+                                   : std::get_if<int32_t>(&rate_entry->second);
+            const auto* channels =
+                channel_entry == map->end()
+                    ? nullptr
+                    : std::get_if<int32_t>(&channel_entry->second);
+            if (pcm != nullptr && rate != nullptr && *rate > 0 &&
+                channels != nullptr && *channels > 0 && *channels <= 2) {
+              PlaySystemAudio(pcm->data(), pcm->size(),
+                              static_cast<uint32_t>(*rate),
+                              static_cast<uint16_t>(*channels));
+            }
+          }
+          result->Success();
+        } else if (call.method_name() == "stopSystemAudioCapture") {
+          StopSystemAudioCapture();
+          result->Success();
+        } else if (call.method_name() == "startSystemAudioPlayback") {
+          result->Success(flutter::EncodableValue(StartClockedPlayback()));
+        } else if (call.method_name() == "stopSystemAudioPlayback") {
+          StopSystemAudioPlayback();
+          result->Success();
         } else if (call.method_name() == "captureFrame") {
           const std::vector<uint8_t> jpeg = CaptureScreenJpeg();
           if (jpeg.empty()) {
@@ -152,6 +198,8 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  StopSystemAudioCapture();
+  StopSystemAudioPlayback();
   app_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

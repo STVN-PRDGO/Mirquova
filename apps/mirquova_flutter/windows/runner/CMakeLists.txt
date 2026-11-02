@@ -12,6 +12,7 @@ add_executable(${BINARY_NAME} WIN32
   "utils.cpp"
   "win32_window.cpp"
   "screen_capture.cpp"
+  "system_audio.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"
   "runner.exe.manifest"
@@ -39,6 +40,9 @@ target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "gdi32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "ole32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "windowscodecs.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "mmdevapi.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "winmm.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "uuid.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

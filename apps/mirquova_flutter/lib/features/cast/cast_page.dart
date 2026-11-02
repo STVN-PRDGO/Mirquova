@@ -24,8 +24,6 @@ class CastPage extends StatefulWidget {
 }
 
 class _CastPageState extends State<CastPage> {
-  bool _mirror = true;
-
   @override
   void initState() {
     super.initState();
@@ -75,10 +73,9 @@ class _CastPageState extends State<CastPage> {
             _ReceiveStatus(service: service),
             const SizedBox(height: 16),
             _Controls(
-              mirror: _mirror,
               supported: service.captureSupported,
+              audio: service.audioSupported,
               sending: service.sending,
-              onMirror: (value) => setState(() => _mirror = value),
               onOpenRemote: widget.onOpenRemote,
               onStop: service.stopOutgoing,
               snapshot: outgoing,
@@ -182,20 +179,18 @@ class _ReceiveStatus extends StatelessWidget {
 
 class _Controls extends StatelessWidget {
   const _Controls({
-    required this.mirror,
     required this.supported,
+    required this.audio,
     required this.sending,
-    required this.onMirror,
     required this.onOpenRemote,
     required this.onStop,
     required this.snapshot,
     required this.message,
   });
 
-  final bool mirror;
   final bool supported;
+  final bool audio;
   final bool sending;
-  final ValueChanged<bool> onMirror;
   final VoidCallback onOpenRemote;
   final VoidCallback onStop;
   final CastSnapshot snapshot;
@@ -205,13 +200,18 @@ class _Controls extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final live = snapshot.status == CastStatus.casting;
+    final size = snapshot.width != null && snapshot.height != null
+        ? '${snapshot.width}×${snapshot.height}'
+        : null;
     return SurfaceCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           StatusChip(
             label: live
-                ? 'Sharing this screen'
+                ? (audio
+                      ? 'Sharing this screen and its sound'
+                      : 'Sharing this screen')
                 : snapshot.status == CastStatus.awaitingApproval
                 ? 'Waiting for approval'
                 : snapshot.status == CastStatus.connecting
@@ -223,48 +223,32 @@ class _Controls extends StatelessWidget {
           const SizedBox(height: 16),
           Text(
             supported
-                ? 'Mirquova-to-Mirquova screen share'
+                ? 'Share this screen'
                 : 'Screen capture is not available on this device',
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: 8),
           Text(
             supported
-                ? 'This shares JPEG frames of this screen over the same trusted pairing used for files. It is not Chromecast or Miracast.'
-                : 'This build can still receive a screen share from a Windows or Android device that is paired here.',
+                ? 'The other device sees this screen after it accepts. ${audio ? 'System audio from this device is included. The microphone is not shared.' : 'This device cannot capture system audio, so the picture is shared without sound.'} This is a Mirquova screen share, not Chromecast or Miracast.'
+                : 'This device can still receive a screen share, including its system audio, from a paired Windows or Android device.',
           ),
-          const SizedBox(height: 16),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(
-                  value: true,
-                  label: Text('Mirror screen'),
-                  icon: Icon(Icons.screenshot_monitor_outlined),
-                ),
-                ButtonSegment(
-                  value: false,
-                  label: Text('Cast media'),
-                  icon: Icon(Icons.movie_outlined),
-                ),
-              ],
-              selected: {mirror},
-              onSelectionChanged: sending
-                  ? null
-                  : (value) => onMirror(value.first),
+          if (live && (size != null || snapshot.frames > 0)) ...[
+            const SizedBox(height: 12),
+            Text(
+              [
+                ?size,
+                if (snapshot.frames > 0) '${snapshot.frames} frames',
+              ].join(' · '),
+              style: TextStyle(
+                color: colors.secondary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            mirror
-                ? 'The whole screen is shared after the other device accepts.'
-                : 'Media casting in this build still shares the screen, including the player if it is open.',
-            style: TextStyle(color: colors.onSurfaceVariant),
-          ),
+          ],
           if (sending || message != null) ...[
             const SizedBox(height: 16),
-            if (sending) const LinearProgressIndicator(),
+            if (sending && !live) const LinearProgressIndicator(),
             if (message != null) ...[const SizedBox(height: 8), Text(message!)],
           ],
           const SizedBox(height: 20),
@@ -279,7 +263,9 @@ class _Controls extends StatelessWidget {
             )
           else
             Text(
-              supported ? 'Choose a paired device below to start.' : 'Pair a Windows or Android device, then accept when it shares here.',
+              supported
+                  ? 'Tap a paired device below. Sharing starts after that device accepts.'
+                  : 'Pair a Windows or Android device, then accept when it shares here.',
               style: TextStyle(color: colors.onSurfaceVariant),
             ),
           const SizedBox(height: 8),

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 /// Shared listen port. Pairing chooses the device, not this number.
 const mirquovaCastPort = 40734;
 
@@ -14,6 +16,18 @@ enum CastStatus {
 
 enum CastRole { send, receive }
 
+class CastAudioChunk {
+  const CastAudioChunk({
+    required this.pcm,
+    required this.sampleRate,
+    required this.channels,
+  });
+
+  final Uint8List pcm;
+  final int sampleRate;
+  final int channels;
+}
+
 class CastSnapshot {
   const CastSnapshot({
     this.status = CastStatus.idle,
@@ -23,6 +37,7 @@ class CastSnapshot {
     this.width,
     this.height,
     this.frames = 0,
+    this.audio = false,
     this.peerIndex,
     this.peerIpv4,
   });
@@ -34,6 +49,7 @@ class CastSnapshot {
   final int? width;
   final int? height;
   final int frames;
+  final bool audio;
   final int? peerIndex;
   final String? peerIpv4;
 
@@ -54,6 +70,7 @@ class CastSnapshot {
     width: (json['width'] as num?)?.toInt(),
     height: (json['height'] as num?)?.toInt(),
     frames: (json['frames'] as num?)?.toInt() ?? 0,
+    audio: json['audio'] == true,
     peerIndex: (json['peer_index'] as num?)?.toInt(),
     peerIpv4: json['peer_ipv4'] as String?,
   );
@@ -75,8 +92,13 @@ String castStatusMessage(CastSnapshot snapshot) => switch (snapshot.status) {
   CastStatus.listening => 'Waiting for a paired device.',
   CastStatus.connecting => 'Connecting to the trusted device.',
   CastStatus.awaitingApproval =>
-    'Review the screen-share request before anything is shown.',
-  CastStatus.casting => 'Sharing a live screen on this LAN.',
+    snapshot.audio
+        ? 'Review the screen share and its system audio before anything is played.'
+        : 'Review the screen-share request before anything is shown.',
+  CastStatus.casting =>
+    snapshot.audio
+        ? 'Sharing this screen and its system audio on this LAN.'
+        : 'Sharing a live screen on this LAN.',
   CastStatus.rejected =>
     snapshot.errorCode == 'no_answer'
         ? 'Nobody answered in time. Nothing was shown.'

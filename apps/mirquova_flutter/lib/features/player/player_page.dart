@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../adapters/open_subtitles_http.dart';
 import '../../adapters/video_playback.dart';
@@ -192,7 +193,7 @@ class _PlayerPageState extends State<PlayerPage> {
         final stage = _Stage(
           playback: widget.playback,
           fullscreen: _fullscreen,
-          onFullscreen: () => setState(() => _fullscreen = true),
+          onFullscreen: _openFullscreen,
           createEngine: widget.createEngine,
         );
         final subtitles = _Subtitles(
@@ -208,45 +209,76 @@ class _PlayerPageState extends State<PlayerPage> {
           onImport: _importSubtitle,
           onDownload: _download,
         );
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const PageHeader(
-              title: 'Media player',
-              subtitle: 'Opens files on this device. Online subtitles are sent only after you opt in with your own API key.',
+        return CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.space): () {
+              widget.playback.togglePlay();
+            },
+            const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
+              widget.playback.seekBy(const Duration(seconds: -10));
+            },
+            const SingleActivator(LogicalKeyboardKey.arrowRight): () {
+              widget.playback.seekBy(const Duration(seconds: 10));
+            },
+            const SingleActivator(LogicalKeyboardKey.keyF): () {
+              if (widget.playback.hasMedia && !_fullscreen) _openFullscreen();
+            },
+            const SingleActivator(LogicalKeyboardKey.escape): () {
+              if (_fullscreen) Navigator.of(context).maybePop();
+            },
+          },
+          child: Focus(
+            autofocus: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const PageHeader(
+                  title: 'Media player',
+                  subtitle: 'Opens a file on this device. Space plays and pauses. Left and right jump 10 seconds. Online subtitles stay off until you opt in.',
+                ),
+                const SizedBox(height: 20),
+                if (!wide)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      stage,
+                      const SizedBox(height: 16),
+                      subtitles,
+                      const SizedBox(height: 16),
+                      library,
+                    ],
+                  )
+                else
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(width: 220, child: library),
+                      const SizedBox(width: 16),
+                      Expanded(child: stage),
+                      const SizedBox(width: 16),
+                      SizedBox(width: 300, child: subtitles),
+                    ],
+                  ),
+              ],
             ),
-            const SizedBox(height: 20),
-            if (!wide)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  stage,
-                  const SizedBox(height: 16),
-                  subtitles,
-                  const SizedBox(height: 16),
-                  library,
-                ],
-              )
-            else
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(width: 220, child: library),
-                  const SizedBox(width: 16),
-                  Expanded(child: stage),
-                  const SizedBox(width: 16),
-                  SizedBox(width: 300, child: subtitles),
-                ],
-              ),
-            if (_fullscreen)
-              _Fullscreen(
-                playback: widget.playback,
-                onClose: () => setState(() => _fullscreen = false),
-              ),
-          ],
+          ),
         );
       },
     );
+  }
+
+  Future<void> _openFullscreen() async {
+    setState(() => _fullscreen = true);
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black,
+      pageBuilder: (dialogContext, _, _) => _Fullscreen(
+        playback: widget.playback,
+        onClose: () => Navigator.of(dialogContext).pop(),
+      ),
+    );
+    if (mounted) setState(() => _fullscreen = false);
   }
 }
 
@@ -412,9 +444,23 @@ class _Stage extends StatelessWidget {
               icon: const Icon(Icons.skip_previous),
             ),
             IconButton(
+              tooltip: 'Back 10 seconds',
+              onPressed: playback.hasMedia
+                  ? () => playback.seekBy(const Duration(seconds: -10))
+                  : null,
+              icon: const Icon(Icons.replay_10),
+            ),
+            IconButton(
               tooltip: playback.playing ? 'Pause' : 'Play',
               onPressed: playback.hasMedia ? playback.togglePlay : null,
               icon: Icon(playback.playing ? Icons.pause : Icons.play_arrow),
+            ),
+            IconButton(
+              tooltip: 'Forward 10 seconds',
+              onPressed: playback.hasMedia
+                  ? () => playback.seekBy(const Duration(seconds: 10))
+                  : null,
+              icon: const Icon(Icons.forward_10),
             ),
             IconButton(
               tooltip: 'Next',
@@ -424,11 +470,24 @@ class _Stage extends StatelessWidget {
               icon: const Icon(Icons.skip_next),
             ),
             IconButton(
-              tooltip: 'Volume',
+              tooltip: playback.volume == 0 ? 'Unmute' : 'Mute',
               onPressed: playback.hasMedia
                   ? () => playback.changeVolume(playback.volume > 0 ? -1 : 1)
                   : null,
-              icon: const Icon(Icons.volume_up_outlined),
+              icon: Icon(
+                playback.volume == 0
+                    ? Icons.volume_off_outlined
+                    : Icons.volume_up_outlined,
+              ),
+            ),
+            SizedBox(
+              width: 120,
+              child: Slider(
+                value: playback.volume,
+                onChanged: playback.hasMedia
+                    ? (value) => playback.changeVolume(value - playback.volume)
+                    : null,
+              ),
             ),
             IconButton(
               tooltip: 'Fullscreen',
@@ -450,20 +509,98 @@ class _Fullscreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          AspectRatio(aspectRatio: 16 / 9, child: playback.buildView()),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: onClose,
-              child: const Text('Leave full screen'),
-            ),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): onClose,
+        const SingleActivator(LogicalKeyboardKey.space): playback.togglePlay,
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
+          playback.seekBy(const Duration(seconds: -10));
+        },
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () {
+          playback.seekBy(const Duration(seconds: 10));
+        },
+      },
+      child: Focus(
+        autofocus: true,
+        child: Material(
+          color: Colors.black,
+          child: ListenableBuilder(
+            listenable: playback,
+            builder: (context, _) {
+              final cue = playback.currentCue;
+              return SafeArea(
+                child: Stack(
+                  children: [
+                    Positioned.fill(child: Center(child: playback.buildView())),
+                    if (cue != null)
+                      Positioned(
+                        left: 24,
+                        right: 24,
+                        bottom: 88,
+                        child: Text(
+                          cue.text,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 22 * playback.subtitleScale,
+                            backgroundColor: playback.subtitleBackground
+                                ? const Color(0xCC000000)
+                                : null,
+                          ),
+                        ),
+                      ),
+                    Positioned(
+                      left: 12,
+                      right: 12,
+                      bottom: 8,
+                      child: Row(
+                        children: [
+                          IconButton(
+                            tooltip: playback.playing ? 'Pause' : 'Play',
+                            color: Colors.white,
+                            onPressed: playback.togglePlay,
+                            icon: Icon(
+                              playback.playing ? Icons.pause : Icons.play_arrow,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Back 10 seconds',
+                            color: Colors.white,
+                            onPressed: () =>
+                                playback.seekBy(const Duration(seconds: -10)),
+                            icon: const Icon(Icons.replay_10),
+                          ),
+                          IconButton(
+                            tooltip: 'Forward 10 seconds',
+                            color: Colors.white,
+                            onPressed: () =>
+                                playback.seekBy(const Duration(seconds: 10)),
+                            icon: const Icon(Icons.forward_10),
+                          ),
+                          Expanded(
+                            child: Slider(
+                              value: playback.duration == Duration.zero
+                                  ? 0
+                                  : (playback.position.inMilliseconds /
+                                            playback.duration.inMilliseconds)
+                                        .clamp(0, 1)
+                                        .toDouble(),
+                              onChanged: playback.seekTo,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: onClose,
+                            child: const Text('Leave full screen'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
-        ],
+        ),
       ),
     );
   }
@@ -513,20 +650,22 @@ class _Subtitles extends StatelessWidget {
           TextField(
             controller: query,
             decoration: const InputDecoration(
-              labelText: 'Title or words to find',
+              labelText: 'Title or words in the loaded subtitle',
             ),
             onSubmitted: (_) => onSearch(),
           ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: apiKey,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'OpenSubtitles API key',
-              helperText:
-                  'Kept in memory for this screen only. It is not saved.',
+          if (optedIn) ...[
+            const SizedBox(height: 8),
+            TextField(
+              controller: apiKey,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'OpenSubtitles API key',
+                helperText:
+                    'Kept in memory for this screen only. It is not saved.',
+              ),
             ),
-          ),
+          ],
           CheckboxListTile(
             contentPadding: EdgeInsets.zero,
             value: optedIn,

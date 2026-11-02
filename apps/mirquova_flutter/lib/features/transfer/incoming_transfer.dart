@@ -84,7 +84,7 @@ class _IncomingTransferDialogState extends State<IncomingTransferDialog> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Total ${formatBytes(snapshot.totalBytes)}. Saved to ${widget.service.folder ?? 'your downloads'}.',
+              'Total ${formatBytes(snapshot.totalBytes)}. Saved to ${widget.service.folder ?? 'your downloads'}. If you do nothing, this is declined after 60 seconds.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
