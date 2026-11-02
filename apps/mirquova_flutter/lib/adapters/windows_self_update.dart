@@ -75,18 +75,31 @@ if ($LASTEXITCODE -lt 8 -and -not $NoRestart) {
     await apply.writeAsString(_applyScript);
     // Dart's detached start does not give PowerShell a working console, so
     // a normal PowerShell launches the hidden updater and returns at once.
+    // Windows PowerShell splits an argument array on spaces, so the whole
+    // command line is one quoted string. Install folders often contain spaces.
     final launch = File('$work${Platform.pathSeparator}launch-update.ps1');
-    String quote(String value) => "'${value.replaceAll("'", "''")}'";
+    String windowsArg(String value) => '"$value"';
+    final arguments = [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      windowsArg(apply.path),
+      '-ParentId',
+      '${parentPid ?? pid}',
+      '-Source',
+      windowsArg(staging.path),
+      '-Target',
+      windowsArg(target.path),
+      '-Executable',
+      windowsArg(executable.path),
+      if (!restart) '-NoRestart',
+    ].join(' ');
+    final quotedArguments = "'${arguments.replaceAll("'", "''")}'";
     await launch.writeAsString(
-      'Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList @('
-      "'-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',"
-      '${quote(apply.path)},'
-      "'-ParentId',${quote('${parentPid ?? pid}')},"
-      "'-Source',${quote(staging.path)},"
-      "'-Target',${quote(target.path)},"
-      "'-Executable',${quote(executable.path)}"
-      '${restart ? '' : ",'-NoRestart'"}'
-      ')',
+      'Start-Process -FilePath powershell.exe -WindowStyle Hidden '
+      '-ArgumentList $quotedArguments',
     );
     final started = await Process.run('powershell.exe', [
       '-NoProfile',
