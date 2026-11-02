@@ -368,9 +368,9 @@ void ClockedPlayback(RenderAudio render) {
     BYTE* buffer_out = nullptr;
     if (FAILED(output->GetBuffer(free, &buffer_out))) break;
     const size_t bytes = static_cast<size_t>(free) * 4;
-    pcm.assign(bytes, 0);
+    pcm.assign(bytes, uint8_t{0});
     if (render(pcm.data(), static_cast<uint32_t>(bytes)) == 0) {
-      std::fill(pcm.begin(), pcm.end(), 0);
+      std::fill(pcm.begin(), pcm.end(), uint8_t{0});
     }
     std::memcpy(buffer_out, pcm.data(), bytes);
     if (FAILED(output->ReleaseBuffer(free, 0))) break;
