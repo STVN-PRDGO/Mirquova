@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'mirquova_mark.dart';
@@ -25,6 +27,7 @@ class _LaunchIntroState extends State<LaunchIntro>
   bool _done = false;
   bool _started = false;
   bool _reduceMotion = false;
+  Timer? _hold;
 
   @override
   void didChangeDependencies() {
@@ -33,9 +36,19 @@ class _LaunchIntroState extends State<LaunchIntro>
     _started = true;
     _reduceMotion = MediaQuery.disableAnimationsOf(context);
     if (_reduceMotion) {
-      // A disabled ticker never completes, so the still splash uses a timer.
-      Future<void>.delayed(LaunchIntro.duration, () {
-        if (mounted) setState(() => _done = true);
+      // A disabled ticker never completes. Each tick schedules a frame so the
+      // splash leaves on its own and tests are not left with a pending timer.
+      var ticks = 0;
+      _hold = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+        if (!mounted) return;
+        ticks++;
+        if (ticks * 100 >= LaunchIntro.duration.inMilliseconds) {
+          timer.cancel();
+          _hold = null;
+          setState(() => _done = true);
+        } else {
+          setState(() {});
+        }
       });
       return;
     }
@@ -46,6 +59,7 @@ class _LaunchIntroState extends State<LaunchIntro>
 
   @override
   void dispose() {
+    _hold?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -73,28 +87,31 @@ class _LaunchIntroState extends State<LaunchIntro>
 
   Widget _still(TextTheme textTheme) => ColoredBox(
     color: LaunchIntro.background,
-    child: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const MirquovaMark(size: 112),
-          const SizedBox(height: 28),
-          Text(
-            'Mirquova',
-            style: textTheme.headlineMedium?.copyWith(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.4,
+    child: SafeArea(
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const MirquovaMark(size: 112),
+            const SizedBox(height: 28),
+            Text(
+              'Mirquova',
+              style: textTheme.headlineMedium?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.4,
+              ),
             ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Every screen. One connection.',
-            style: textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFFA7B4C8),
+            const SizedBox(height: 6),
+            Text(
+              'Every screen. One connection.',
+              style: textTheme.bodyMedium?.copyWith(
+                color: const Color(0xFFA7B4C8),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     ),
   );
