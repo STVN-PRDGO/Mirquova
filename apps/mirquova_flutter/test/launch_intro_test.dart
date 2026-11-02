@@ -27,10 +27,17 @@ void main() {
     expect(find.text('Behind'), findsOneWidget);
   });
 
-  testWidgets('skips the intro when animations are reduced', (tester) async {
+  testWidgets('shows a still splash when animations are reduced', (
+    tester,
+  ) async {
     await tester.pumpWidget(app(reduceMotion: true));
     await tester.pump();
+    expect(find.text('Mirquova'), findsOneWidget);
+    expect(find.text('Every screen. One connection.'), findsOneWidget);
+    await tester.pump(LaunchIntro.duration);
+    await tester.pump();
     expect(find.text('Mirquova'), findsNothing);
+    expect(find.text('Behind'), findsOneWidget);
   });
 
   testWidgets('never blocks taps on the app underneath', (tester) async {

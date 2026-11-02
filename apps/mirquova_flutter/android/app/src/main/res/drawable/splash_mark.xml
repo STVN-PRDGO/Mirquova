@@ -1,25 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Sized for the Android 12 splash icon canvas; the mark sits in the 160dp safe circle. -->
+<!-- Sized for the Android 12 splash icon canvas; the mark sits in the 160dp safe circle.
+     A solid fill is required: the system splash renderer drops icons that use gradients. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="240dp"
     android:height="240dp"
     android:viewportWidth="240"
     android:viewportHeight="240">
-    <path android:pathData="M95,64 L145,64 A31,31 0 0 1 176,95 L176,145 A31,31 0 0 1 145,176 L95,176 A31,31 0 0 1 64,145 L64,95 A31,31 0 0 1 95,64 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:type="linear"
-                android:startX="64"
-                android:startY="64"
-                android:endX="176"
-                android:endY="176">
-                <item android:offset="0" android:color="#FF3478F6" />
-                <item android:offset="0.5" android:color="#FF22D3EE" />
-                <item android:offset="1" android:color="#FF8B5CF6" />
-            </gradient>
-        </aapt:attr>
-    </path>
+    <path
+        android:pathData="M95,64 L145,64 A31,31 0 0 1 176,95 L176,145 A31,31 0 0 1 145,176 L95,176 A31,31 0 0 1 64,145 L64,95 A31,31 0 0 1 95,64 Z"
+        android:fillColor="#FF3478F6" />
     <path
         android:pathData="M92,150 L92,92 L120,124 L148,92 L148,150"
         android:strokeColor="#FFFFFFFF"

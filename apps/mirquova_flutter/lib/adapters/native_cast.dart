@@ -363,6 +363,9 @@ class CastService extends ChangeNotifier {
   List<TrustedPeer> _armedPeers = const [];
   Timer? _receiveTimer;
   Timer? _audioTimer;
+  Timer? _captureAudioTimer;
+  bool _readingCapture = false;
+  DateTime _nextFrame = DateTime.fromMillisecondsSinceEpoch(0);
   Timer? _retryTimer;
   Timer? _presenceTimer;
   String? receiveProblem;
@@ -598,6 +601,31 @@ class CastService extends ChangeNotifier {
     });
   }
 
+  void _ensureAudioCapture() {
+    if (_captureAudioTimer != null) return;
+    _captureAudioTimer = Timer.periodic(
+      const Duration(milliseconds: 10),
+      (_) => unawaited(_captureAudioOnce()),
+    );
+    unawaited(_captureAudioOnce());
+  }
+
+  Future<void> _captureAudioOnce() async {
+    if (_readingCapture || _disposed) return;
+    _readingCapture = true;
+    try {
+      final pcm = await _systemAudio.captureChunk();
+      if (pcm != null && !_disposed) _api.pushAudio(pcm, 48000, 2);
+    } finally {
+      _readingCapture = false;
+    }
+  }
+
+  void _stopAudioCaptureTimer() {
+    _captureAudioTimer?.cancel();
+    _captureAudioTimer = null;
+  }
+
   void _stopPlaybackClock() {
     _audioTimer?.cancel();
     _audioTimer = null;
@@ -670,6 +698,7 @@ class CastService extends ChangeNotifier {
 
   void stopOutgoing() {
     _sendGeneration++;
+    _stopAudioCaptureTimer();
     _api.stopSend();
     unawaited(_capture.stop());
     unawaited(_systemAudio.stopCapture());
@@ -698,6 +727,7 @@ class CastService extends ChangeNotifier {
       snapshot.frames == 0;
 
   Future<void> _finishSend(CastSnapshot result, TrustedPeer peer) async {
+    _stopAudioCaptureTimer();
     await _capture.stop();
     await _systemAudio.stopCapture();
     outgoing = result;
@@ -736,24 +766,31 @@ class CastService extends ChangeNotifier {
         errorCode: 'invalid_input',
       );
     }
-    while (true) {
-      await Future<void>.delayed(frameInterval);
-      if (_disposed || generation != _sendGeneration) return outgoing;
-      final CastSnapshot snapshot;
-      try {
-        snapshot = _api.readSend();
-      } on Object {
-        return const CastSnapshot(status: CastStatus.error);
+    try {
+      while (true) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        if (_disposed || generation != _sendGeneration) return outgoing;
+        final CastSnapshot snapshot;
+        try {
+          snapshot = _api.readSend();
+        } on Object {
+          return const CastSnapshot(status: CastStatus.error);
+        }
+        if (snapshot.status == CastStatus.casting) {
+          _ensureAudioCapture();
+          final now = DateTime.now();
+          if (!now.isBefore(_nextFrame)) {
+            _nextFrame = now.add(frameInterval);
+            final frame = await _capture.captureFrame();
+            if (frame != null) _api.pushFrame(frame);
+          }
+        }
+        if (snapshot.finished) return snapshot;
+        outgoing = snapshot;
+        _notify();
       }
-      if (snapshot.status == CastStatus.casting) {
-        final frame = await _capture.captureFrame();
-        if (frame != null) _api.pushFrame(frame);
-        final pcm = await _systemAudio.captureChunk();
-        if (pcm != null) _api.pushAudio(pcm, 48000, 2);
-      }
-      if (snapshot.finished) return snapshot;
-      outgoing = snapshot;
-      _notify();
+    } finally {
+      _stopAudioCaptureTimer();
     }
   }
 
@@ -794,6 +831,7 @@ class CastService extends ChangeNotifier {
     _presenceTimer?.cancel();
     _receiveTimer?.cancel();
     _audioTimer?.cancel();
+    _stopAudioCaptureTimer();
     unawaited(_capture.stop());
     unawaited(_systemAudio.stop());
     _api.stopSend();

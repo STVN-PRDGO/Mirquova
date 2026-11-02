@@ -217,11 +217,14 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
     if (cast.incomingLive && !_incomingCastViewOpen && context != null) {
       _incomingCastViewOpen = true;
       unawaited(
-        showDialog<void>(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => IncomingCastViewer(service: cast),
-        ).whenComplete(() => _incomingCastViewOpen = false),
+        Navigator.of(context, rootNavigator: true)
+            .push<void>(
+              MaterialPageRoute<void>(
+                fullscreenDialog: true,
+                builder: (_) => IncomingCastViewer(service: cast),
+              ),
+            )
+            .whenComplete(() => _incomingCastViewOpen = false),
       );
     }
     final ended = cast.takeLastIncomingMessage();
@@ -417,9 +420,11 @@ class _MirquovaAppState extends State<MirquovaApp> with WidgetsBindingObserver {
     theme: mirquovaTheme(Brightness.light),
     darkTheme: mirquovaTheme(Brightness.dark),
     themeMode: _theme,
-    builder: (context, child) => widget.showIntro
-        ? LaunchIntro(child: child ?? const SizedBox.shrink())
-        : child ?? const SizedBox.shrink(),
+    builder: (context, child) => SizedBox.expand(
+      child: widget.showIntro
+          ? LaunchIntro(child: child ?? const SizedBox.expand())
+          : child ?? const SizedBox.shrink(),
+    ),
     home: AppShell(section: _section, onSelect: _open, child: _page()),
   );
 }

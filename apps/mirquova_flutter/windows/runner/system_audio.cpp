@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -30,8 +31,10 @@ struct Loopback {
   IAudioCaptureClient* capture = nullptr;
   WAVEFORMATEX* format = nullptr;
   bool float32 = false;
+  bool passthrough = false;
   uint32_t source_rate = 0;
   uint16_t source_channels = 0;
+  uint16_t bits = 0;
   std::vector<float> pending;
   double cursor = 0;
 };
@@ -74,6 +77,21 @@ void ReleaseLoopback() {
   }
   g_loop.pending.clear();
   g_loop.cursor = 0;
+  g_loop.passthrough = false;
+  g_loop.bits = 0;
+}
+
+bool StartClient(WAVEFORMATEX* format, DWORD extra_flags) {
+  const HRESULT result = g_loop.client->Initialize(
+      AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK | extra_flags,
+      1000000, 0, format, nullptr);
+  if (FAILED(result)) return false;
+  if (FAILED(g_loop.client->GetService(
+          __uuidof(IAudioCaptureClient),
+          reinterpret_cast<void**>(&g_loop.capture)))) {
+    return false;
+  }
+  return SUCCEEDED(g_loop.client->Start());
 }
 
 bool EnsureLoopback() {
@@ -92,40 +110,81 @@ bool EnsureLoopback() {
                             reinterpret_cast<void**>(&g_loop.client));
   device->Release();
   if (FAILED(result)) return false;
+  WAVEFORMATEX wanted{};
+  wanted.wFormatTag = WAVE_FORMAT_PCM;
+  wanted.nChannels = kChannels;
+  wanted.nSamplesPerSec = kRate;
+  wanted.wBitsPerSample = 16;
+  wanted.nBlockAlign = kChannels * 2;
+  wanted.nAvgBytesPerSec = kRate * wanted.nBlockAlign;
+  // Shared mode converts the mix format to 16-bit 48 kHz stereo. Reading the
+  // raw mix buffer as the wrong width is what turns system audio into noise.
+  if (StartClient(&wanted, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
+                               AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY)) {
+    g_loop.passthrough = true;
+    g_loop.float32 = false;
+    g_loop.bits = 16;
+    g_loop.source_rate = kRate;
+    g_loop.source_channels = kChannels;
+    return true;
+  }
+  ReleaseLoopback();
+  result = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                            __uuidof(IMMDeviceEnumerator),
+                            reinterpret_cast<void**>(&enumerator));
+  if (FAILED(result)) return false;
+  result = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device);
+  enumerator->Release();
+  enumerator = nullptr;
+  if (FAILED(result)) return false;
+  result = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                            reinterpret_cast<void**>(&g_loop.client));
+  device->Release();
+  if (FAILED(result)) return false;
   result = g_loop.client->GetMixFormat(&g_loop.format);
   if (FAILED(result) || g_loop.format == nullptr) {
     ReleaseLoopback();
     return false;
   }
-  result = g_loop.client->Initialize(
-      AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 200000, 0,
-      g_loop.format, nullptr);
-  if (FAILED(result)) {
-    ReleaseLoopback();
-    return false;
-  }
-  result = g_loop.client->GetService(
-      __uuidof(IAudioCaptureClient), reinterpret_cast<void**>(&g_loop.capture));
-  if (FAILED(result)) {
-    ReleaseLoopback();
-    return false;
-  }
   g_loop.float32 = IsFloatFormat(g_loop.format);
+  g_loop.bits = g_loop.format->wBitsPerSample;
   g_loop.source_rate = g_loop.format->nSamplesPerSec;
   g_loop.source_channels = g_loop.format->nChannels;
-  if (g_loop.source_rate == 0 || g_loop.source_channels == 0 ||
-      (!g_loop.float32 && g_loop.format->wBitsPerSample != 16)) {
-    ReleaseLoopback();
-    return false;
-  }
-  if (FAILED(g_loop.client->Start())) {
+  const bool readable = g_loop.source_rate > 0 && g_loop.source_channels > 0 &&
+                        (g_loop.float32 || g_loop.bits == 16 || g_loop.bits == 32);
+  if (!readable || !StartClient(g_loop.format, 0)) {
     ReleaseLoopback();
     return false;
   }
   return true;
 }
 
+std::vector<uint8_t> DrainPassthrough() {
+  std::vector<uint8_t> bytes;
+  UINT32 packet = 0;
+  while (SUCCEEDED(g_loop.capture->GetNextPacketSize(&packet)) && packet > 0) {
+    BYTE* data = nullptr;
+    UINT32 frames = 0;
+    DWORD flags = 0;
+    if (FAILED(g_loop.capture->GetBuffer(&data, &frames, &flags, nullptr,
+                                         nullptr))) {
+      break;
+    }
+    const size_t size = static_cast<size_t>(frames) * 4;
+    if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0 || data == nullptr) {
+      bytes.insert(bytes.end(), size, uint8_t{0});
+    } else {
+      bytes.insert(bytes.end(), data, data + size);
+    }
+    g_loop.capture->ReleaseBuffer(frames);
+  }
+  if (bytes.size() > 64 * 1024) bytes.resize(64 * 1024);
+  bytes.resize(bytes.size() - bytes.size() % 4);
+  return bytes;
+}
+
 std::vector<uint8_t> DrainLoopback() {
+  if (g_loop.passthrough) return DrainPassthrough();
   UINT32 packet = 0;
   while (SUCCEEDED(g_loop.capture->GetNextPacketSize(&packet)) && packet > 0) {
     BYTE* data = nullptr;
@@ -142,6 +201,11 @@ std::vector<uint8_t> DrainLoopback() {
     } else if (g_loop.float32) {
       const auto* input = reinterpret_cast<const float*>(data);
       g_loop.pending.insert(g_loop.pending.end(), input, input + count);
+    } else if (g_loop.bits == 32) {
+      const auto* input = reinterpret_cast<const int32_t*>(data);
+      for (size_t index = 0; index < count; ++index) {
+        g_loop.pending.push_back(input[index] / 2147483648.0f);
+      }
     } else {
       const auto* input = reinterpret_cast<const int16_t*>(data);
       for (size_t index = 0; index < count; ++index) {

@@ -23,13 +23,20 @@ class _LaunchIntroState extends State<LaunchIntro>
     duration: LaunchIntro.duration,
   );
   bool _done = false;
+  bool _started = false;
+  bool _reduceMotion = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_done || _controller.isAnimating) return;
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _done = true;
+    if (_done || _started) return;
+    _started = true;
+    _reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (_reduceMotion) {
+      // A disabled ticker never completes, so the still splash uses a timer.
+      Future<void>.delayed(LaunchIntro.duration, () {
+        if (mounted) setState(() => _done = true);
+      });
       return;
     }
     _controller.forward().whenCompleteOrCancel(() {
@@ -54,6 +61,7 @@ class _LaunchIntroState extends State<LaunchIntro>
 
   @override
   Widget build(BuildContext context) => Stack(
+    fit: StackFit.expand,
     children: [
       widget.child,
       if (!_done)
@@ -61,6 +69,34 @@ class _LaunchIntroState extends State<LaunchIntro>
           child: IgnorePointer(child: ExcludeSemantics(child: _overlay())),
         ),
     ],
+  );
+
+  Widget _still(TextTheme textTheme) => ColoredBox(
+    color: LaunchIntro.background,
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const MirquovaMark(size: 112),
+          const SizedBox(height: 28),
+          Text(
+            'Mirquova',
+            style: textTheme.headlineMedium?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Every screen. One connection.',
+            style: textTheme.bodyMedium?.copyWith(
+              color: const Color(0xFFA7B4C8),
+            ),
+          ),
+        ],
+      ),
+    ),
   );
 
   Widget _overlay() {
@@ -72,6 +108,7 @@ class _LaunchIntroState extends State<LaunchIntro>
     final word = _interval(0.22, 0.52);
     final tagline = _interval(0.32, 0.62);
     final exit = _interval(0.78, 1, Curves.easeInCubic);
+    if (_reduceMotion) return _still(Theme.of(context).textTheme);
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {

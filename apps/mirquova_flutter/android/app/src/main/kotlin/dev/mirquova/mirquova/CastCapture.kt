@@ -146,6 +146,7 @@ object CastCapture {
             current?.release()
             val min = AudioTrack.getMinBufferSize(sampleRate, mask, AudioFormat.ENCODING_PCM_16BIT)
             if (min <= 0) return
+            val hold = sampleRate / 1000 * channels * 2 * 200
             val track = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
@@ -160,7 +161,7 @@ object CastCapture {
                         .setChannelMask(mask)
                         .build(),
                 )
-                .setBufferSizeInBytes(maxOf(min, pcm.size * 2))
+                .setBufferSizeInBytes(maxOf(min, hold))
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
             track.play()

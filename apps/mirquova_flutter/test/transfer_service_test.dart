@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -100,6 +101,14 @@ class _Discovery extends DiscoveryPort {
   void hide() {}
 }
 
+Future<void> _until(FutureOr<bool> Function() ready) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 2));
+  while (DateTime.now().isBefore(deadline)) {
+    if (await ready()) return;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+}
+
 void main() {
   late _Store store;
   late _Api api;
@@ -174,9 +183,12 @@ void main() {
         ),
       ],
     );
-    await Future<void>.delayed(const Duration(milliseconds: 50));
+    await _until(() => transfer.incomingNeedsAnswer);
     expect(transfer.incomingNeedsAnswer, isTrue);
     expect(transfer.incomingPeer?.alias, 'Pixel');
+    await _until(
+      () async => (await trust.list()).single.lanIpv4 == '192.168.1.41',
+    );
     expect((await trust.list()).single.lanIpv4, '192.168.1.41');
     expect(api.approvals, 0);
 
@@ -194,7 +206,7 @@ void main() {
         ),
       ],
     );
-    await Future<void>.delayed(const Duration(milliseconds: 50));
+    await _until(() => api.receiveConfigs.length == 2 && transfer.receiving);
 
     final result = transfer.takeLastIncoming();
     expect(result?.senderAlias, 'Pixel');

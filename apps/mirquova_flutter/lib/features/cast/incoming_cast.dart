@@ -120,51 +120,81 @@ class _IncomingCastViewerState extends State<IncomingCastViewer> {
     final colors = Theme.of(context).colorScheme;
     final sender = widget.service.incomingPeer?.alias ?? 'A paired device';
     final frame = widget.service.incomingFrame;
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    final muted = widget.service.playbackMuted;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _stop();
+      },
+      child: Scaffold(
         backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text('Screen from $sender'),
-        automaticallyImplyLeading: false,
-        actions: [
-          if (widget.service.incoming.width != null)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Text(
-                  '${widget.service.incoming.width}×${widget.service.incoming.height} · ${widget.service.incoming.frames}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(
+              color: Colors.black,
+              child: Center(
+                child: frame == null
+                    ? Text(
+                        'Waiting for the first frame…',
+                        style: TextStyle(color: colors.onInverseSurface),
+                      )
+                    : Image.memory(
+                        frame,
+                        gaplessPlayback: true,
+                        filterQuality: FilterQuality.medium,
+                        fit: BoxFit.contain,
+                      ),
+              ),
+            ),
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 0,
+              child: SafeArea(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Screen from $sender',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: muted ? 'Unmute' : 'Mute',
+                          onPressed: () =>
+                              widget.service.setPlaybackMuted(!muted),
+                          icon: Icon(
+                            muted
+                                ? Icons.volume_off_outlined
+                                : Icons.volume_up_outlined,
+                            color: Colors.white,
+                          ),
+                        ),
+                        FilledButton.icon(
+                          onPressed: _stop,
+                          icon: const Icon(Icons.fullscreen_exit),
+                          label: const Text('Exit'),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
-          IconButton(
-            tooltip: widget.service.playbackMuted ? 'Unmute' : 'Mute',
-            onPressed: () =>
-                widget.service.setPlaybackMuted(!widget.service.playbackMuted),
-            icon: Icon(
-              widget.service.playbackMuted
-                  ? Icons.volume_off_outlined
-                  : Icons.volume_up_outlined,
-            ),
-          ),
-          TextButton(onPressed: _stop, child: const Text('Stop')),
-        ],
-      ),
-      body: ColoredBox(
-        color: Colors.black,
-        child: Center(
-          child: frame == null
-              ? Text(
-                  'Waiting for the first frame…',
-                  style: TextStyle(color: colors.onInverseSurface),
-                )
-              : Image.memory(
-                  frame,
-                  gaplessPlayback: true,
-                  filterQuality: FilterQuality.medium,
-                  fit: BoxFit.contain,
-                ),
+          ],
         ),
       ),
     );
