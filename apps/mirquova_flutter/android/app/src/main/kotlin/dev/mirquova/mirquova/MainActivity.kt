@@ -2,6 +2,7 @@ package dev.mirquova.mirquova
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -16,6 +17,7 @@ import android.provider.Settings
 import android.view.WindowManager
 import androidx.core.content.FileProvider
 import java.io.File
+import java.security.MessageDigest
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -249,6 +251,11 @@ class MainActivity : FlutterActivity() {
             return false
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        when (existingPublishedFile(name, source)) {
+            true -> return true
+            false -> return false
+            null -> Unit
+        }
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, name)
             put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Mirquova")
@@ -267,6 +274,44 @@ class MainActivity : FlutterActivity() {
             contentResolver.delete(uri, null, null)
             false
         }
+    }
+
+    /// Returns null when the public collection has no matching filename, or
+    /// whether an existing row has the same bytes as the verified inbox file.
+    private fun existingPublishedFile(name: String, source: File): Boolean? {
+        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
+        val cursor = contentResolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.MediaColumns._ID),
+            selection,
+            arrayOf(name, "${Environment.DIRECTORY_DOWNLOADS}/Mirquova/"),
+            null,
+        ) ?: return null
+        val existing = mutableListOf<Uri>()
+        cursor.use {
+            while (it.moveToNext()) {
+                existing += ContentUris.withAppendedId(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    it.getLong(0),
+                )
+            }
+        }
+        if (existing.isEmpty()) return null
+        val expected = source.inputStream().use(::sha256)
+        return existing.any { uri ->
+            contentResolver.openInputStream(uri)?.use(::sha256)?.contentEquals(expected) == true
+        }
+    }
+
+    private fun sha256(input: java.io.InputStream): ByteArray {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+        return digest.digest()
     }
 
     private fun releaseMulticast() {

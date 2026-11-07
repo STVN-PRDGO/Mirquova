@@ -118,6 +118,11 @@ String incomingResultMessage(IncomingResult result) {
     TransferStatus.rejected when snapshot.errorCode == 'no_answer' =>
       'A request from ${result.senderAlias} expired. Nothing was saved.',
     TransferStatus.rejected => 'Declined files from ${result.senderAlias}.',
+    _
+        when snapshot.files.any(
+          (file) => file.state == TransferFileState.verified,
+        ) =>
+      'Receiving from ${result.senderAlias} failed. ${transferStatusMessage(snapshot)} Verified files were saved to ${result.folder}.',
     _ =>
       'Receiving from ${result.senderAlias} failed. ${transferStatusMessage(snapshot)}',
   };

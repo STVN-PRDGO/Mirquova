@@ -566,11 +566,15 @@ class TransferService extends ChangeNotifier {
 
   Future<void> _finishIncoming(TransferSnapshot snapshot) async {
     var savedTo = folder ?? '';
-    if (snapshot.status == TransferStatus.completed && savedTo.isNotEmpty) {
+    final verifiedNames = [
+      for (final file in snapshot.files)
+        if (file.state == TransferFileState.verified) file.name,
+    ];
+    if (verifiedNames.isNotEmpty && savedTo.isNotEmpty) {
       try {
         savedTo = await _publishFiles(
           destination: savedTo,
-          names: [for (final file in snapshot.files) file.name],
+          names: verifiedNames,
         );
       } on Object {
         // The verified app inbox remains available if public publication fails.

@@ -660,6 +660,15 @@ fn receive_file(
     let final_path = contained_path(destination, &file.name).map_err(|_| "invalid_name")?;
     if final_path.exists() {
         discard(stream, file.size, cancel)?;
+        if existing_file_matches(&final_path, file, cancel)? {
+            state.update(|value| {
+                if let Some(item) = value.files.get_mut(index) {
+                    item.transferred = file.size;
+                    item.state = TransferFileState::Verified;
+                }
+            });
+            return Ok(());
+        }
         return Err("conflict");
     }
     state.update(|value| {
@@ -694,6 +703,22 @@ fn receive_file(
         }
     });
     Ok(())
+}
+
+fn existing_file_matches(
+    path: &Path,
+    offered: &OfferFile,
+    cancel: &AtomicBool,
+) -> Result<bool, &'static str> {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return Ok(false);
+    };
+    if !metadata.file_type().is_file() || metadata.len() != offered.size {
+        return Ok(false);
+    }
+    let expected = decode_hex(&offered.sha256).ok_or("protocol")?;
+    let actual = decode_hex(&hash_file(path, offered.size, cancel)?).ok_or("protocol")?;
+    Ok(bool::from(expected.as_slice().ct_eq(actual.as_slice())))
 }
 
 fn send_file(
@@ -1267,6 +1292,34 @@ mod tests {
         wait_until(&receive, TransferStatus::Completed);
         assert_eq!(fs::read(destination.join("note.txt")).unwrap(), b"hello");
         assert_eq!(fs::read(destination.join("empty.txt")).unwrap(), b"");
+        drop(send);
+        drop(receive);
+
+        // Re-sending an already received file with identical bytes is safe;
+        // this recovers a batch whose later file failed.
+        let sender = PairingIdentity::generate().unwrap();
+        let sender_ca = sender.certificate_der().to_vec();
+        let receiver = PairingIdentity::generate().unwrap();
+        let receiver_ca = receiver.certificate_der().to_vec();
+        let receive =
+            ReceiveSession::start(address, 0, receiver, &[sender_ca.as_slice()], &destination)
+                .unwrap();
+        let retry_source = root.join("note.txt");
+        let send = SendSession::start(
+            address,
+            receive.endpoint().port(),
+            sender,
+            &receiver_ca,
+            &[retry_source],
+        )
+        .unwrap();
+        wait_until(&receive, TransferStatus::AwaitingApproval);
+        assert!(receive.approve());
+        wait_until(&send, TransferStatus::Completed);
+        wait_until(&receive, TransferStatus::Completed);
+        assert_eq!(fs::read(destination.join("note.txt")).unwrap(), b"hello");
+        drop(send);
+        drop(receive);
 
         let sender = PairingIdentity::generate().unwrap();
         let sender_ca = sender.certificate_der().to_vec();
@@ -1275,7 +1328,10 @@ mod tests {
         let receive =
             ReceiveSession::start(address, 0, receiver, &[sender_ca.as_slice()], &destination)
                 .unwrap();
-        let conflict_source = root.join("note.txt");
+        let conflict_directory = root.join("different-content");
+        fs::create_dir(&conflict_directory).unwrap();
+        let conflict_source = conflict_directory.join("note.txt");
+        fs::write(&conflict_source, b"different bytes").unwrap();
         let send = SendSession::start(
             address,
             receive.endpoint().port(),

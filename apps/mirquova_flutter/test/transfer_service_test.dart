@@ -282,6 +282,48 @@ void main() {
     },
   );
 
+  test('a later failure publishes only files already verified', () async {
+    await trust.trust(alias: 'Pixel', certificateDer: [9, 9, 9]);
+    final publishedNames = <String>[];
+    final transfer = service(
+      publishFiles: ({required destination, required names}) async {
+        publishedNames.addAll(names);
+        return 'Downloads/Mirquova';
+      },
+    );
+    addTearDown(transfer.dispose);
+    await transfer.startReceiving();
+
+    api.receive = const TransferSnapshot(
+      status: TransferStatus.error,
+      errorCode: 'network',
+      files: [
+        TransferFileSnapshot(
+          name: 'finished.mp4',
+          size: 100,
+          transferred: 100,
+          state: TransferFileState.verified,
+        ),
+        TransferFileSnapshot(
+          name: 'interrupted.mp4',
+          size: 500,
+          transferred: 25,
+          state: TransferFileState.failed,
+        ),
+      ],
+    );
+    await _until(() => publishedNames.isNotEmpty);
+    await _until(() => api.receiveConfigs.length == 2 && transfer.receiving);
+
+    expect(publishedNames, ['finished.mp4']);
+    final result = transfer.takeLastIncoming();
+    expect(result, isNotNull);
+    expect(
+      incomingResultMessage(result!),
+      contains('Verified files were saved'),
+    );
+  });
+
   test('a stale saved address falls back to the discovered one', () async {
     await trust.trust(
       alias: 'Pixel',
