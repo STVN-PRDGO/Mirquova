@@ -158,7 +158,10 @@ String transferStatusMessage(TransferSnapshot snapshot) =>
             ? 'Nobody answered in time. No file was kept.'
             : 'The transfer was declined. No file was kept.',
       TransferStatus.stopped => 'The transfer was stopped.',
-      TransferStatus.error => _error(snapshot.errorCode),
+      TransferStatus.error =>
+        snapshot.errorCode == 'network' && snapshot.transferredBytes > 0
+            ? 'The connection dropped during transfer. Check which files finished on the receiving device before retrying.'
+            : _error(snapshot.errorCode),
     };
 
 String _error(String? code) => switch (code) {

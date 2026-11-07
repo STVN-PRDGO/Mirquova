@@ -126,6 +126,28 @@ void main() {
     if (await folder.exists()) await folder.delete(recursive: true);
   });
 
+  test(
+    'a mid-transfer disconnect is not reported as an unreachable device',
+    () {
+      const snapshot = TransferSnapshot(
+        status: TransferStatus.error,
+        errorCode: 'network',
+        files: [
+          TransferFileSnapshot(
+            name: 'video.mp4',
+            size: 100,
+            transferred: 25,
+            state: TransferFileState.failed,
+          ),
+        ],
+      );
+      expect(
+        transferStatusMessage(snapshot),
+        contains('connection dropped during transfer'),
+      );
+    },
+  );
+
   TransferService service({
     DiscoveryPort? discovery,
     Future<String> Function({
