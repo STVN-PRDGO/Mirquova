@@ -256,6 +256,11 @@ class TransferService extends ChangeNotifier {
     this.discovery,
     String? alias,
     Future<String?> Function()? defaultFolder,
+    Future<String> Function({
+      required String destination,
+      required List<String> names,
+    })?
+    publishFiles,
     this.receivePoll = const Duration(milliseconds: 300),
     this.retryDelay = const Duration(seconds: 5),
     this.discoveryWait = const Duration(seconds: 6),
@@ -263,6 +268,7 @@ class TransferService extends ChangeNotifier {
   }) : _api = api ?? NativeTransferApi(),
        _aliasOverride = alias,
        _defaultFolder = defaultFolder ?? defaultReceiveFolder,
+       _publishFiles = publishFiles ?? publishReceivedFiles,
        // The Android emulator reaches its host PC only through 10.0.2.2, and
        // its NAT hides mDNS. Mutual TLS still rejects any other listener.
        _lastResortHosts =
@@ -281,6 +287,11 @@ class TransferService extends ChangeNotifier {
   final String? _aliasOverride;
   String? _alias;
   final Future<String?> Function() _defaultFolder;
+  final Future<String> Function({
+    required String destination,
+    required List<String> names,
+  })
+  _publishFiles;
   final List<String> _lastResortHosts;
 
   List<TrustedPeer> peers = const [];
@@ -298,6 +309,7 @@ class TransferService extends ChangeNotifier {
   TransferSnapshot incoming = const TransferSnapshot();
   TrustedPeer? incomingPeer;
   bool _addressRecorded = false;
+  bool _finishingIncoming = false;
   IncomingResult? _lastIncoming;
 
   TransferSnapshot outgoing = const TransferSnapshot();
@@ -450,6 +462,7 @@ class TransferService extends ChangeNotifier {
         return;
       }
       _armed = true;
+      _finishingIncoming = false;
       _armedPeers = current;
       receiveProblem = null;
       incoming = const TransferSnapshot(status: TransferStatus.listening);
@@ -519,7 +532,9 @@ class TransferService extends ChangeNotifier {
         snapshot.transferredBytes != incoming.transferredBytes;
     incoming = snapshot;
     if (snapshot.finished) {
+      if (_finishingIncoming) return;
       if (snapshot.files.isNotEmpty || incomingPeer != null) {
+        _finishingIncoming = true;
         unawaited(_finishIncoming(snapshot));
         return;
       }
@@ -534,10 +549,14 @@ class TransferService extends ChangeNotifier {
   Future<void> _finishIncoming(TransferSnapshot snapshot) async {
     var savedTo = folder ?? '';
     if (snapshot.status == TransferStatus.completed && savedTo.isNotEmpty) {
-      savedTo = await publishReceivedFiles(
-        destination: savedTo,
-        names: [for (final file in snapshot.files) file.name],
-      );
+      try {
+        savedTo = await _publishFiles(
+          destination: savedTo,
+          names: [for (final file in snapshot.files) file.name],
+        );
+      } on Object {
+        // The verified app inbox remains available if public publication fails.
+      }
     }
     if (_disposed) return;
     _lastIncoming = IncomingResult(

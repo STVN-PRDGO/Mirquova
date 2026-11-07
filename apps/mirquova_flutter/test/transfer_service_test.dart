@@ -126,12 +126,20 @@ void main() {
     if (await folder.exists()) await folder.delete(recursive: true);
   });
 
-  TransferService service({DiscoveryPort? discovery}) => TransferService(
+  TransferService service({
+    DiscoveryPort? discovery,
+    Future<String> Function({
+      required String destination,
+      required List<String> names,
+    })?
+    publishFiles,
+  }) => TransferService(
     identities: PairingIdentityRepository(api: _Identity(), store: store),
     trustedPeers: trust,
     settings: store,
     api: api,
     discovery: discovery,
+    publishFiles: publishFiles,
     alias: 'Desk PC',
     defaultFolder: () async => folder.path,
     receivePoll: const Duration(milliseconds: 10),
@@ -214,6 +222,43 @@ void main() {
     expect(api.receiveConfigs, hasLength(2));
     expect(transfer.receiving, isTrue);
   });
+
+  test(
+    'a completed receive publishes files only once while the copy is pending',
+    () async {
+      await trust.trust(alias: 'Pixel', certificateDer: [9, 9, 9]);
+      final publishResult = Completer<String>();
+      var publishCalls = 0;
+      final transfer = service(
+        publishFiles: ({required destination, required names}) {
+          publishCalls++;
+          expect(names, ['video.mp4']);
+          return publishResult.future;
+        },
+      );
+      addTearDown(transfer.dispose);
+      await transfer.startReceiving();
+
+      api.receive = const TransferSnapshot(
+        status: TransferStatus.completed,
+        files: [
+          TransferFileSnapshot(
+            name: 'video.mp4',
+            size: 2048,
+            transferred: 2048,
+            state: TransferFileState.verified,
+          ),
+        ],
+      );
+      await _until(() => publishCalls == 1);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(publishCalls, 1);
+
+      publishResult.complete(folder.path);
+      await _until(() => api.receiveConfigs.length == 2 && transfer.receiving);
+      expect(publishCalls, 1);
+    },
+  );
 
   test('a stale saved address falls back to the discovered one', () async {
     await trust.trust(

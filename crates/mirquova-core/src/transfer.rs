@@ -23,9 +23,10 @@ use uuid::Uuid;
 const PROTOCOL_VERSION: u16 = 1;
 const MAX_FRAME_BYTES: usize = 16 * 1024;
 const MAX_FILES: usize = 32;
-const MAX_FILE_BYTES: u64 = 1024 * 1024 * 1024;
+// Support large video files while retaining a protocol-level bound.
+const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_NAME_BYTES: usize = 120;
-const IO_TIMEOUT: Duration = Duration::from_secs(15);
+const IO_TIMEOUT: Duration = Duration::from_secs(120);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const ACCEPT_POLL: Duration = Duration::from_millis(100);
 /// The receiver declines on its own if nobody answers the offer in time.
@@ -1161,6 +1162,20 @@ mod tests {
             }],
         };
         assert!(matches!(validate_offer(&offer), Err("protocol")));
+    }
+
+    #[test]
+    fn offer_accepts_files_larger_than_one_gibibyte_within_limit() {
+        let offer = Offer {
+            version: PROTOCOL_VERSION,
+            purpose: "file-offer".to_owned(),
+            files: vec![OfferFile {
+                name: "video.mp4".to_owned(),
+                size: 1024 * 1024 * 1024 + 1,
+                sha256: "00".repeat(32),
+            }],
+        };
+        assert!(validate_offer(&offer).is_ok());
     }
 
     #[test]
