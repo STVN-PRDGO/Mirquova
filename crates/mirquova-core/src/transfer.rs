@@ -26,7 +26,8 @@ const MAX_FILES: usize = 32;
 // Support large video files while retaining a protocol-level bound.
 const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_NAME_BYTES: usize = 120;
-const IO_TIMEOUT: Duration = Duration::from_secs(120);
+// Large transfers can pause while Android wakes storage or Wi-Fi back up.
+const IO_TIMEOUT: Duration = Duration::from_secs(300);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const ACCEPT_POLL: Duration = Duration::from_millis(100);
 /// The receiver declines on its own if nobody answers the offer in time.

@@ -34,7 +34,7 @@ class PickedTransferFile {
   });
   final String path;
   final String name;
-  final int size;
+  final int? size;
 }
 
 class _TransferPageState extends State<TransferPage> {
@@ -87,15 +87,21 @@ class _TransferPageState extends State<TransferPage> {
 
   Future<List<PickedTransferFile>> _defaultPickFiles() async {
     final picked = await FilePicker.pickFiles(type: FileType.any);
-    return [
-      for (final file in picked)
-        if (file.path != null)
-          PickedTransferFile(
-            path: file.path!,
-            name: file.name,
-            size: file.lengthSync() ?? 0,
-          ),
-    ];
+    final files = <PickedTransferFile>[];
+    for (final file in picked) {
+      final path = file.path;
+      if (path == null) continue;
+      int? size = file.lengthSync();
+      if (size == null) {
+        try {
+          size = await file.length();
+        } on Object {
+          size = null;
+        }
+      }
+      files.add(PickedTransferFile(path: path, name: file.name, size: size));
+    }
+    return files;
   }
 
   Future<void> _chooseFiles() async {
@@ -292,7 +298,9 @@ class _FilesCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final total = files.fold(0, (sum, file) => sum + file.size);
+    final total = files.any((file) => file.size == null)
+        ? null
+        : files.fold<int>(0, (sum, file) => sum + file.size!);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -321,7 +329,11 @@ class _FilesCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                subtitle: Text(formatBytes(file.size)),
+                subtitle: Text(
+                  file.size == null
+                      ? 'Size unavailable'
+                      : formatBytes(file.size!),
+                ),
                 trailing: IconButton(
                   tooltip: 'Remove ${file.name}',
                   onPressed: enabled ? () => onRemove(file) : null,
@@ -331,7 +343,7 @@ class _FilesCard extends StatelessWidget {
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                '${files.length} ${files.length == 1 ? 'file' : 'files'} · ${formatBytes(total)}',
+                '${files.length} ${files.length == 1 ? 'file' : 'files'} · ${total == null ? 'Size unavailable' : formatBytes(total)}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),

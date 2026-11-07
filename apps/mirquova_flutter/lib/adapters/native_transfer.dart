@@ -310,6 +310,7 @@ class TransferService extends ChangeNotifier {
   TrustedPeer? incomingPeer;
   bool _addressRecorded = false;
   bool _finishingIncoming = false;
+  bool _keepAwakeRequested = false;
   IncomingResult? _lastIncoming;
 
   TransferSnapshot outgoing = const TransferSnapshot();
@@ -486,6 +487,22 @@ class TransferService extends ChangeNotifier {
     _armed = false;
     incoming = const TransferSnapshot();
     incomingPeer = null;
+    _refreshKeepAwake();
+  }
+
+  void _refreshKeepAwake() {
+    final active = [incoming.status, outgoing.status].any(
+      (status) =>
+          status == TransferStatus.awaitingApproval ||
+          status == TransferStatus.transferring,
+    );
+    if (!Platform.isAndroid || active == _keepAwakeRequested) return;
+    _keepAwakeRequested = active;
+    unawaited(
+      const MethodChannel('dev.mirquova/app')
+          .invokeMethod<void>('setTransferKeepAwake', active)
+          .catchError((Object _) {}),
+    );
   }
 
   /// Keeps this device visible to paired devices whose saved address is
@@ -531,6 +548,7 @@ class TransferService extends ChangeNotifier {
         snapshot.status != incoming.status ||
         snapshot.transferredBytes != incoming.transferredBytes;
     incoming = snapshot;
+    _refreshKeepAwake();
     if (snapshot.finished) {
       if (_finishingIncoming) return;
       if (snapshot.files.isNotEmpty || incomingPeer != null) {
@@ -625,6 +643,7 @@ class TransferService extends ChangeNotifier {
     _api.stopSend();
     outgoing = const TransferSnapshot(status: TransferStatus.stopped);
     sendMessage = transferStatusMessage(outgoing);
+    _refreshKeepAwake();
     _notify();
   }
 
@@ -643,6 +662,7 @@ class TransferService extends ChangeNotifier {
 
   void _finishSend(TransferSnapshot result, TrustedPeer peer) {
     outgoing = result;
+    _refreshKeepAwake();
     sendMessage = switch (result.status) {
       TransferStatus.completed => 'Sent to ${peer.alias}.',
       TransferStatus.rejected =>
@@ -692,6 +712,7 @@ class TransferService extends ChangeNotifier {
       }
       if (snapshot.finished) return snapshot;
       outgoing = snapshot;
+      _refreshKeepAwake();
       _notify();
     }
   }
@@ -734,6 +755,13 @@ class TransferService extends ChangeNotifier {
     _receiveTimer?.cancel();
     _api.stopSend();
     _api.stopReceive();
+    if (_keepAwakeRequested && Platform.isAndroid) {
+      unawaited(
+        const MethodChannel('dev.mirquova/app')
+            .invokeMethod<void>('setTransferKeepAwake', false)
+            .catchError((Object _) {}),
+      );
+    }
     super.dispose();
   }
 }

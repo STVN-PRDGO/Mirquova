@@ -403,4 +403,41 @@ void main() {
     await tester.tap(find.text('Pair a device'));
     expect(opened, isTrue);
   });
+
+  testWidgets('the page does not show an unknown file size as zero', (
+    tester,
+  ) async {
+    await tester.runAsync(
+      () => trust.trust(alias: 'Pixel', certificateDer: [9, 9, 9]),
+    );
+    final transfer = service();
+    addTearDown(transfer.dispose);
+    await tester.runAsync(transfer.reloadPeers);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: mirquovaTheme(Brightness.light),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: TransferPage(
+              service: transfer,
+              onOpenPair: () {},
+              pickFiles: () async => const [
+                PickedTransferFile(
+                  path: 'C:/clip.mp4',
+                  name: 'clip.mp4',
+                  size: null,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Choose files'));
+    await tester.pump();
+
+    expect(find.text('Size unavailable'), findsOneWidget);
+    expect(find.text('0 B'), findsNothing);
+  });
 }
